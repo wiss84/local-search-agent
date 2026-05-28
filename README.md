@@ -16,6 +16,7 @@ Point it at a folder. Ask a question. The agent searches your documents, reads t
 
 ---
 
+
 ## Why not RAG?
 
 Traditional RAG (Retrieval-Augmented Generation) has a fundamental problem: it converts your documents into embeddings and stores them in a vector database. That means:

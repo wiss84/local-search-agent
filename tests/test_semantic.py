@@ -27,7 +27,10 @@ from local_search_agent.semantic.structural_parser import StructuralParser
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_node(tmp_path, name="report.txt", text="Default content.", workspace="ws") -> DocumentNode:
+
+def _make_node(
+    tmp_path, name="report.txt", text="Default content.", workspace="ws"
+) -> DocumentNode:
     f = tmp_path / name
     f.write_text(text, encoding="utf-8")
     return DocumentNode.from_file(str(f), text=text, workspace=workspace)
@@ -45,14 +48,15 @@ def _mock_llm(response_text: str):
 # ConceptCompiler
 # ---------------------------------------------------------------------------
 
+
 class TestConceptCompiler:
     def test_parses_valid_json(self, tmp_path):
-        llm = _mock_llm('''{
+        llm = _mock_llm("""{
             "concepts": ["cloud costs", "AWS", "finance"],
             "synonyms": ["Amazon Web Services", "infrastructure budget"],
             "entities": ["Project Alpha", "Finance Division"],
             "summary": "Q3 finance report for Project Alpha."
-        }''')
+        }""")
         compiler = ConceptCompiler(llm=llm)
         node = _make_node(tmp_path, text="AWS spend on Project Alpha was $1.2M in Q3 2024.")
         meta = compiler.compile(node)
@@ -63,7 +67,9 @@ class TestConceptCompiler:
         assert "Q3 finance" in meta.summary
 
     def test_strips_markdown_fences(self, tmp_path):
-        llm = _mock_llm('```json\n{"concepts": ["test"], "synonyms": [], "entities": [], "summary": "ok"}\n```')
+        llm = _mock_llm(
+            '```json\n{"concepts": ["test"], "synonyms": [], "entities": [], "summary": "ok"}\n```'
+        )
         compiler = ConceptCompiler(llm=llm)
         node = _make_node(tmp_path)
         meta = compiler.compile(node)
@@ -100,6 +106,7 @@ class TestConceptCompiler:
 # StructuralParser
 # ---------------------------------------------------------------------------
 
+
 class TestStructuralParser:
     def test_extracts_headings(self, tmp_path):
         text = "# Executive Summary\n\n## Financial Overview\n\nSome content.\n"
@@ -117,12 +124,7 @@ class TestStructuralParser:
         assert any("AWS" in d for d in meta.definitions)
 
     def test_extracts_table_key_values(self, tmp_path):
-        text = (
-            "| Metric | Value |\n"
-            "| --- | --- |\n"
-            "| Total Spend | $1.2M |\n"
-            "| Headcount | 42 |\n"
-        )
+        text = "| Metric | Value |\n| --- | --- |\n| Total Spend | $1.2M |\n| Headcount | 42 |\n"
         node = _make_node(tmp_path, text=text)
         parser = StructuralParser()
         meta = parser.parse(node)
@@ -144,6 +146,7 @@ class TestStructuralParser:
 
     def test_to_searchable_text(self, tmp_path):
         from local_search_agent.semantic.structural_parser import StructuralMetadata
+
         meta = StructuralMetadata(
             sections=["Executive Summary"],
             definitions=["AWS: Amazon Web Services"],
@@ -166,6 +169,7 @@ class TestStructuralParser:
 # ---------------------------------------------------------------------------
 # QueryExpander
 # ---------------------------------------------------------------------------
+
 
 class TestQueryExpander:
     def test_llm_expansion_appends_terms(self):
@@ -196,9 +200,16 @@ class TestQueryExpander:
     def test_index_based_expansion_appends_concepts(self):
         mock_meili = MagicMock()
         mock_meili.search.return_value = [
-            {"doc_id": "abc", "concepts": ["employee satisfaction", "job retention"],
-             "title": "HR Report", "file_type": "pdf", "workspace": "hr",
-             "source_path": "/hr.pdf", "modified_at": "2025-01-01", "snippet": ""},
+            {
+                "doc_id": "abc",
+                "concepts": ["employee satisfaction", "job retention"],
+                "title": "HR Report",
+                "file_type": "pdf",
+                "workspace": "hr",
+                "source_path": "/hr.pdf",
+                "modified_at": "2025-01-01",
+                "snippet": "",
+            },
         ]
         expander = QueryExpander(llm=None)
         expanded = expander.expand("morale", meili_client=mock_meili, workspace="hr")
@@ -214,6 +225,7 @@ class TestQueryExpander:
 # ---------------------------------------------------------------------------
 # LinkGraph
 # ---------------------------------------------------------------------------
+
 
 class TestLinkGraph:
     def test_add_and_get_link(self, tmp_path):
@@ -292,9 +304,12 @@ class TestLinkGraph:
 # SemanticEnricher
 # ---------------------------------------------------------------------------
 
+
 class TestSemanticEnricher:
     def test_enriches_concepts_and_synonyms(self, tmp_path):
-        llm = _mock_llm('{"concepts": ["cloud costs"], "synonyms": ["AWS spend"], "entities": ["Project Alpha"], "summary": "Finance report."}')
+        llm = _mock_llm(
+            '{"concepts": ["cloud costs"], "synonyms": ["AWS spend"], "entities": ["Project Alpha"], "summary": "Finance report."}'
+        )
         enricher = SemanticEnricher(llm=llm, enable_structural=True)
         node = _make_node(tmp_path, text="# Finance\n\nAWS spend on Project Alpha was $1.2M.")
         enricher.enrich(node)
@@ -323,7 +338,9 @@ class TestSemanticEnricher:
             assert f"Section {i}" in node.synonyms
 
     def test_link_graph_built_for_shared_concepts(self, tmp_path):
-        llm = _mock_llm('{"concepts": ["cloud", "AWS", "infra", "budget"], "synonyms": [], "entities": [], "summary": ""}')
+        llm = _mock_llm(
+            '{"concepts": ["cloud", "AWS", "infra", "budget"], "synonyms": [], "entities": [], "summary": ""}'
+        )
         enricher = SemanticEnricher(
             llm=llm,
             enable_structural=False,
@@ -342,6 +359,7 @@ class TestSemanticEnricher:
         enricher.enrich_batch(nodes)
 
         from local_search_agent.semantic.link_graph import LinkGraph
+
         graph = LinkGraph(db_path=str(tmp_path / "test.db"))
         related = graph.get_related(nodes[0].doc_id)
         assert any(r["target_doc_id"] == nodes[1].doc_id for r in related)
@@ -350,6 +368,7 @@ class TestSemanticEnricher:
 # ---------------------------------------------------------------------------
 # AccessControlMiddleware
 # ---------------------------------------------------------------------------
+
 
 class TestAccessControlMiddleware:
     def _make_app(self, tmp_path, enable_ac: bool = True):
@@ -373,6 +392,7 @@ class TestAccessControlMiddleware:
         txt = tmp_path / "report.txt"
         txt.write_text("AWS spend $1.2M", encoding="utf-8")
         from local_search_agent.core.document_node import DocumentNode
+
         node = DocumentNode.from_file(str(txt), text="AWS spend $1.2M", workspace="ws")
         wm.create_workspace("ws", str(tmp_path))
         wm.register_document(node)
@@ -387,6 +407,7 @@ class TestAccessControlMiddleware:
 
     def test_ac_enabled_no_header_returns_401(self, tmp_path):
         import os
+
         os.environ.pop("LSA_ACCESS_CONTROL_BYPASS", None)
         client, doc_id = self._make_app(tmp_path, enable_ac=True)
         resp = client.get(f"/text/{doc_id}")
@@ -394,6 +415,7 @@ class TestAccessControlMiddleware:
 
     def test_ac_bypass_env_allows_request(self, tmp_path):
         import os
+
         os.environ["LSA_ACCESS_CONTROL_BYPASS"] = "1"
         try:
             client, doc_id = self._make_app(tmp_path, enable_ac=True)
@@ -404,6 +426,7 @@ class TestAccessControlMiddleware:
 
     def test_health_endpoint_not_protected(self, tmp_path):
         import os
+
         os.environ.pop("LSA_ACCESS_CONTROL_BYPASS", None)
         client, _ = self._make_app(tmp_path, enable_ac=True)
         resp = client.get("/health")

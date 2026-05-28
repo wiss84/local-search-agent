@@ -67,9 +67,7 @@ logger = logging.getLogger(__name__)
 
 MEILI_BINARY_VERSION = "v1.13.3"
 
-MEILI_RELEASE_BASE = (
-    "https://github.com/meilisearch/meilisearch/releases/download"
-)
+MEILI_RELEASE_BASE = "https://github.com/meilisearch/meilisearch/releases/download"
 
 HEALTH_ENDPOINT = "/health"
 
@@ -82,11 +80,9 @@ DEFAULT_TIMEOUT = 30.0
 _ASSET_MAP: dict[tuple[str, str], str] = {
     ("windows", "amd64"): "meilisearch-windows-amd64.exe",
     ("windows", "x86_64"): "meilisearch-windows-amd64.exe",
-
     ("darwin", "arm64"): "meilisearch-macos-apple-silicon",
     ("darwin", "x86_64"): "meilisearch-macos-amd64",
     ("darwin", "amd64"): "meilisearch-macos-amd64",
-
     ("linux", "x86_64"): "meilisearch-linux-amd64",
     ("linux", "amd64"): "meilisearch-linux-amd64",
     ("linux", "aarch64"): "meilisearch-linux-aarch64",
@@ -134,11 +130,7 @@ def _version_dir() -> Path:
 def _binary_path() -> Path:
     system = platform.system().lower()
 
-    name = (
-        "meilisearch.exe"
-        if system == "windows"
-        else "meilisearch"
-    )
+    name = "meilisearch.exe" if system == "windows" else "meilisearch"
 
     return _version_dir() / name
 
@@ -157,6 +149,7 @@ def _lock_path() -> Path:
 # Platform Detection
 # -----------------------------------------------------------------------------
 
+
 def _detect_asset() -> str:
     system = platform.system().lower()
     machine = platform.machine().lower()
@@ -166,14 +159,9 @@ def _detect_asset() -> str:
     asset = _ASSET_MAP.get(key)
 
     if asset is None:
-        supported = ", ".join(
-            f"{s}/{m}" for s, m in _ASSET_MAP.keys()
-        )
+        supported = ", ".join(f"{s}/{m}" for s, m in _ASSET_MAP.keys())
 
-        raise RuntimeError(
-            f"Unsupported platform: {system}/{machine}. "
-            f"Supported: {supported}"
-        )
+        raise RuntimeError(f"Unsupported platform: {system}/{machine}. Supported: {supported}")
 
     return asset
 
@@ -182,14 +170,11 @@ def _detect_asset() -> str:
 # URLs
 # -----------------------------------------------------------------------------
 
+
 def _binary_url() -> str:
     asset = _detect_asset()
 
-    return (
-        f"{MEILI_RELEASE_BASE}/"
-        f"{MEILI_BINARY_VERSION}/"
-        f"{asset}"
-    )
+    return f"{MEILI_RELEASE_BASE}/{MEILI_BINARY_VERSION}/{asset}"
 
 
 def _checksum_url() -> str:
@@ -202,6 +187,7 @@ def _checksum_url() -> str:
 # -----------------------------------------------------------------------------
 # SHA256
 # -----------------------------------------------------------------------------
+
 
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
@@ -250,6 +236,7 @@ def _fetch_checksums() -> dict[str, str]:
 # Download
 # -----------------------------------------------------------------------------
 
+
 def _download_binary(dest: Path) -> None:
     """
     Download Meilisearch binary for the current platform.
@@ -291,12 +278,7 @@ def _download_binary(dest: Path) -> None:
         shutil.move(str(tmp_path), str(dest))
 
         if platform.system().lower() != "windows":
-            dest.chmod(
-                dest.stat().st_mode
-                | stat.S_IEXEC
-                | stat.S_IXGRP
-                | stat.S_IXOTH
-            )
+            dest.chmod(dest.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
         logger.info("Binary installed at %s", dest)
 
@@ -308,6 +290,7 @@ def _download_binary(dest: Path) -> None:
 # -----------------------------------------------------------------------------
 # HTTP Health
 # -----------------------------------------------------------------------------
+
 
 def _is_http_healthy(
     url: str,
@@ -345,6 +328,7 @@ def _wait_healthy(
 # MeilisearchManager
 # -----------------------------------------------------------------------------
 
+
 class MeilisearchManager:
     """
     Manage a local Meilisearch runtime.
@@ -371,20 +355,13 @@ class MeilisearchManager:
         self._env = env
         self._auto_download = auto_download
 
-        self._data_dir = (
-            data_dir
-            or (_cache_dir() / "data")
-        )
+        self._data_dir = data_dir or (_cache_dir() / "data")
 
         self._process: Optional[subprocess.Popen] = None
 
-        self._stdout_log = (
-            _logs_dir() / "meilisearch.stdout.log"
-        )
+        self._stdout_log = _logs_dir() / "meilisearch.stdout.log"
 
-        self._stderr_log = (
-            _logs_dir() / "meilisearch.stderr.log"
-        )
+        self._stderr_log = _logs_dir() / "meilisearch.stderr.log"
 
     # -------------------------------------------------------------------------
     # Public Helpers
@@ -417,9 +394,7 @@ class MeilisearchManager:
             return dest
 
         if not self._auto_download:
-            raise FileNotFoundError(
-                f"Meilisearch binary not found: {dest}"
-            )
+            raise FileNotFoundError(f"Meilisearch binary not found: {dest}")
 
         lock = FileLock(str(_lock_path()))
 
@@ -449,8 +424,7 @@ class MeilisearchManager:
         if self._process is not None:
             if self._process.poll() is not None:
                 logger.warning(
-                    "Meilisearch process exited unexpectedly "
-                    "(code=%s)",
+                    "Meilisearch process exited unexpectedly (code=%s)",
                     self._process.returncode,
                 )
 
@@ -518,9 +492,7 @@ class MeilisearchManager:
         }
 
         if sys.platform == "win32":
-            kwargs["creationflags"] = (
-                subprocess.CREATE_NO_WINDOW
-            )
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
         else:
             kwargs["start_new_session"] = True
 
@@ -538,6 +510,7 @@ class MeilisearchManager:
         # Register cleanup so Meilisearch stops when the Python process exits
         # (covers Ctrl+C, normal exit, and unhandled exceptions on all platforms)
         import atexit
+
         atexit.register(self.stop)
 
         logger.info(
@@ -587,16 +560,12 @@ class MeilisearchManager:
                 self._process.terminate()
 
             else:
-                self._process.send_signal(
-                    signal.SIGTERM
-                )
+                self._process.send_signal(signal.SIGTERM)
 
             self._process.wait(timeout=10)
 
         except subprocess.TimeoutExpired:
-            logger.warning(
-                "Force-killing Meilisearch"
-            )
+            logger.warning("Force-killing Meilisearch")
 
             self._process.kill()
 
@@ -644,6 +613,7 @@ class MeilisearchManager:
 # Standalone Setup
 # -----------------------------------------------------------------------------
 
+
 def run_setup(force: bool = False) -> None:
     """
     CLI helper for manual setup.
@@ -654,10 +624,7 @@ def run_setup(force: bool = False) -> None:
     binary = manager.binary_path
 
     if binary.exists() and not force:
-        print(
-            f"✓ Meilisearch already installed:\n"
-            f"  {binary}"
-        )
+        print(f"✓ Meilisearch already installed:\n  {binary}")
         return
 
     print("=" * 60)

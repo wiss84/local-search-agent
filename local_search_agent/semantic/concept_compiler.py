@@ -72,6 +72,7 @@ JSON response:"""
 @dataclass
 class ConceptMetadata:
     """Semantic metadata extracted from a document by the concept compiler."""
+
     concepts: list[str] = field(default_factory=list)
     synonyms: list[str] = field(default_factory=list)
     entities: list[str] = field(default_factory=list)
@@ -113,9 +114,9 @@ class ConceptCompiler:
             return self._parse_response(raw, node.title)
         except Exception as e:
             logger.warning(
-                "ConceptCompiler LLM call failed for %r: %s. "
-                "Indexing without semantic metadata.",
-                node.title, e,
+                "ConceptCompiler LLM call failed for %r: %s. Indexing without semantic metadata.",
+                node.title,
+                e,
             )
             return ConceptMetadata()
 
@@ -126,9 +127,7 @@ class ConceptCompiler:
         try:
             data = json.loads(clean)
         except json.JSONDecodeError as e:
-            logger.warning(
-                "ConceptCompiler: failed to parse JSON for %r: %s", title, e
-            )
+            logger.warning("ConceptCompiler: failed to parse JSON for %r: %s", title, e)
             return ConceptMetadata()
 
         def _str_list(val) -> list[str]:

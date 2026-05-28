@@ -69,7 +69,7 @@ class IncrementalSyncScheduler:
         self._wm = workspace_manager
         self._db = metadata_db
         self._default_interval = interval_minutes
-        self._scheduler = None       # Lazy init
+        self._scheduler = None  # Lazy init
         self._running = False
         # workspace_name → SearchAgentConfig
         self._workspace_configs: dict[str, object] = {}
@@ -88,15 +88,14 @@ class IncrementalSyncScheduler:
                 from apscheduler.schedulers.background import BackgroundScheduler
             except ImportError as e:
                 raise ImportError(
-                    "APScheduler is not installed. "
-                    "Run: pip install 'apscheduler>=3.11.2,<4.0'"
+                    "APScheduler is not installed. Run: pip install 'apscheduler>=3.11.2,<4.0'"
                 ) from e
 
             self._scheduler = BackgroundScheduler(
                 executors={"default": ThreadPoolExecutor(max_workers=4)},
                 job_defaults={
-                    "coalesce": True,       # If a job is overdue, run it once (not N times)
-                    "max_instances": 1,     # Never run the same workspace job concurrently
+                    "coalesce": True,  # If a job is overdue, run it once (not N times)
+                    "max_instances": 1,  # Never run the same workspace job concurrently
                     "misfire_grace_time": 60,
                 },
             )
@@ -141,7 +140,7 @@ class IncrementalSyncScheduler:
 
     def add_workspace(
         self,
-        config,   # SearchAgentConfig
+        config,  # SearchAgentConfig
         interval_minutes: Optional[int] = None,
         progress_callback=None,
     ) -> None:
@@ -161,18 +160,16 @@ class IncrementalSyncScheduler:
         self._workspace_callbacks[workspace] = progress_callback
 
         # Ensure sync_job record exists in MetadataDB
-        next_sync = (
-            datetime.now().astimezone() + timedelta(minutes=interval)
-        ).isoformat()
+        next_sync = (datetime.now().astimezone() + timedelta(minutes=interval)).isoformat()
         self._db.upsert_sync_job(workspace=workspace, next_sync_at=next_sync)
 
         if not self._running:
-            logger.info(
-                "Workspace %r registered for sync (scheduler not yet started).", workspace
-            )
+            logger.info("Workspace %r registered for sync (scheduler not yet started).", workspace)
             return
 
-        self._schedule_workspace_job(workspace, config, interval, self._workspace_callbacks.get(workspace))
+        self._schedule_workspace_job(
+            workspace, config, interval, self._workspace_callbacks.get(workspace)
+        )
 
     def remove_workspace(self, workspace: str) -> None:
         """Remove a workspace from the sync schedule."""
@@ -204,7 +201,9 @@ class IncrementalSyncScheduler:
     def _job_id(workspace: str) -> str:
         return f"incremental_sync_{workspace}"
 
-    def _schedule_workspace_job(self, workspace: str, config, interval: int, progress_callback=None) -> None:
+    def _schedule_workspace_job(
+        self, workspace: str, config, interval: int, progress_callback=None
+    ) -> None:
         """Add or replace the APScheduler interval job for a workspace."""
         scheduler = self._get_scheduler()
         job_id = self._job_id(workspace)
@@ -223,9 +222,7 @@ class IncrementalSyncScheduler:
             name=f"Sync workspace: {workspace}",
             args=[workspace, config, progress_callback],
         )
-        logger.info(
-            "Scheduled sync job for workspace %r every %d minutes.", workspace, interval
-        )
+        logger.info("Scheduled sync job for workspace %r every %d minutes.", workspace, interval)
 
     def _run_sync(self, workspace: str, config, progress_callback=None) -> None:
         """
@@ -260,9 +257,7 @@ class IncrementalSyncScheduler:
             stats = pipeline.run(force=False, progress_callback=progress_callback)
             duration = time.monotonic() - start_time
 
-            logger.info(
-                "Sync complete for workspace %r: %s", workspace, stats
-            )
+            logger.info("Sync complete for workspace %r: %s", workspace, stats)
 
             # Calculate next sync time
             interval = self._default_interval
@@ -278,9 +273,7 @@ class IncrementalSyncScheduler:
                 except Exception:
                     pass
 
-            next_sync = (
-                datetime.now().astimezone() + timedelta(minutes=interval)
-            ).isoformat()
+            next_sync = (datetime.now().astimezone() + timedelta(minutes=interval)).isoformat()
 
             self._db.record_sync_finish(
                 history_id=history_id,
@@ -333,11 +326,13 @@ class IncrementalSyncScheduler:
         if self._scheduler:
             for job in self._scheduler.get_jobs():
                 next_run = job.next_run_time
-                jobs.append({
-                    "job_id": job.id,
-                    "name": job.name,
-                    "next_run_at": next_run.isoformat() if next_run else None,
-                })
+                jobs.append(
+                    {
+                        "job_id": job.id,
+                        "name": job.name,
+                        "next_run_at": next_run.isoformat() if next_run else None,
+                    }
+                )
         return {
             "running": self._running,
             "registered_workspaces": list(self._workspace_configs.keys()),

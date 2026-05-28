@@ -72,6 +72,7 @@ def build_llm(config: SearchAgentConfig) -> "BaseChatModel":
 # Provider implementations
 # ---------------------------------------------------------------------------
 
+
 def _build_google(config: SearchAgentConfig) -> "BaseChatModel":
     """
     Google AI Studio via langchain-google-genai.
@@ -99,7 +100,7 @@ def _build_google(config: SearchAgentConfig) -> "BaseChatModel":
     return ChatGoogleGenerativeAI(
         model=config.model_name,
         google_api_key=config.api_key,
-        temperature=0,          # Deterministic responses for RAG
+        temperature=0,  # Deterministic responses for RAG
         max_retries=5,
     )
 
@@ -121,8 +122,7 @@ def _build_ollama(config: SearchAgentConfig) -> "BaseChatModel":
         from langchain_ollama import ChatOllama
     except ImportError as e:
         raise ImportError(
-            "langchain-ollama is not installed. "
-            "Run: pip install 'langchain-ollama>=1.1.0'"
+            "langchain-ollama is not installed. Run: pip install 'langchain-ollama>=1.1.0'"
         ) from e
 
     model = config.model_name or "gemma4:e2b"
@@ -142,8 +142,7 @@ def _build_openai(config: SearchAgentConfig) -> "BaseChatModel":
         from langchain_openai import ChatOpenAI
     except ImportError as e:
         raise ImportError(
-            "langchain-openai is not installed. "
-            "Run: pip install 'langchain-openai>=1.1.10'"
+            "langchain-openai is not installed. Run: pip install 'langchain-openai>=1.1.10'"
         ) from e
 
     if not config.api_key:
@@ -170,8 +169,7 @@ def _build_anthropic(config: SearchAgentConfig) -> "BaseChatModel":
         from langchain_anthropic import ChatAnthropic
     except ImportError as e:
         raise ImportError(
-            "langchain-anthropic is not installed. "
-            "Run: pip install 'langchain-anthropic>=1.4.2'"
+            "langchain-anthropic is not installed. Run: pip install 'langchain-anthropic>=1.4.2'"
         ) from e
 
     if not config.api_key:

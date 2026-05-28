@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 # Terminal UI helpers
 # ---------------------------------------------------------------------------
 
+
 def _print_banner() -> None:
     """Print the AGENT ASCII art banner using pyfiglet + rich."""
     try:
@@ -46,6 +47,7 @@ def _console():
     """Return a rich Console instance, falling back to plain print if unavailable."""
     try:
         from rich.console import Console
+
         return Console()
     except ImportError:
         return None
@@ -60,12 +62,14 @@ def _print_answer(answer: str, iterations: int, truncated: bool) -> None:
 
         console = Console()
         console.print()
-        console.print(Panel(
-            Markdown(answer),
-            title="[bold green]Answer[/bold green]",
-            border_style="green",
-            padding=(1, 2),
-        ))
+        console.print(
+            Panel(
+                Markdown(answer),
+                title="[bold green]Answer[/bold green]",
+                border_style="green",
+                padding=(1, 2),
+            )
+        )
         footer = f"Iterations used: {iterations}"
         if truncated:
             footer += "  [yellow]Answer may be incomplete (max iterations reached).[/yellow]"
@@ -85,9 +89,11 @@ def _print_answer(answer: str, iterations: int, truncated: bool) -> None:
 # config
 # ---------------------------------------------------------------------------
 
+
 def cmd_config_set_key(args: argparse.Namespace) -> None:
     """Save an API key for a provider."""
     from local_search_agent.core.key_manager import keys_file_path, set_key
+
     try:
         set_key(args.provider, args.key)
         print(f"✓ API key saved for provider '{args.provider}'.")
@@ -100,6 +106,7 @@ def cmd_config_set_key(args: argparse.Namespace) -> None:
 def cmd_config_delete_key(args: argparse.Namespace) -> None:
     """Remove the saved API key for a provider."""
     from local_search_agent.core.key_manager import delete_key
+
     deleted = delete_key(args.provider)
     if deleted:
         print(f"✓ API key for '{args.provider}' removed.")
@@ -110,6 +117,7 @@ def cmd_config_delete_key(args: argparse.Namespace) -> None:
 def cmd_config_list_keys(args: argparse.Namespace) -> None:
     """List all saved API keys (masked)."""
     from local_search_agent.core.key_manager import keys_file_path, list_keys
+
     keys = list_keys()
     print(f"Saved keys ({keys_file_path()}):")
     if not keys:
@@ -122,6 +130,7 @@ def cmd_config_list_keys(args: argparse.Namespace) -> None:
 def cmd_config_add_model(args: argparse.Namespace) -> None:
     """Add a model name for a provider."""
     from local_search_agent.core.key_manager import add_model, models_file_path
+
     try:
         add_model(args.provider, args.model_name)
         print(f"\u2713 Model '{args.model_name}' added for provider '{args.provider}'.")
@@ -134,6 +143,7 @@ def cmd_config_add_model(args: argparse.Namespace) -> None:
 def cmd_config_delete_model(args: argparse.Namespace) -> None:
     """Remove a model name for a provider."""
     from local_search_agent.core.key_manager import delete_model
+
     deleted = delete_model(args.provider, args.model_name)
     if deleted:
         print(f"\u2713 Model '{args.model_name}' removed from provider '{args.provider}'.")
@@ -144,6 +154,7 @@ def cmd_config_delete_model(args: argparse.Namespace) -> None:
 def cmd_config_list_models(args: argparse.Namespace) -> None:
     """List all saved model names per provider."""
     from local_search_agent.core.key_manager import get_models, models_file_path
+
     all_models = get_models()
     print(f"Saved models ({models_file_path()}):")
     for provider, models in all_models.items():
@@ -158,10 +169,11 @@ def cmd_config_list_models(args: argparse.Namespace) -> None:
 def cmd_config_set_semantic(args: argparse.Namespace) -> None:
     """Enable or disable a semantic feature flag."""
     from local_search_agent.core.key_manager import set_semantic_setting, settings_file_path
+
     key_map = {
-        "semantic":        "enable_semantic",
+        "semantic": "enable_semantic",
         "query-expansion": "enable_query_expansion",
-        "link-graph":      "enable_link_graph",
+        "link-graph": "enable_link_graph",
     }
     setting_key = key_map[args.feature]
     value = args.value.lower() in ("true", "1", "on", "yes", "enable")
@@ -178,10 +190,13 @@ def cmd_config_set_semantic(args: argparse.Namespace) -> None:
 def cmd_config_show_semantic(args: argparse.Namespace) -> None:
     """Show current semantic feature flag settings."""
     from local_search_agent.core.key_manager import get_semantic_settings, settings_file_path
+
     settings = get_semantic_settings()
     print(f"Semantic settings ({settings_file_path()}):")
     print(f"  {'enable_semantic':<28} {'ON' if settings['enable_semantic'] else 'off'}")
-    print(f"  {'enable_query_expansion':<28} {'ON' if settings['enable_query_expansion'] else 'off'}")
+    print(
+        f"  {'enable_query_expansion':<28} {'ON' if settings['enable_query_expansion'] else 'off'}"
+    )
     print(f"  {'enable_link_graph':<28} {'ON' if settings['enable_link_graph'] else 'off'}")
 
 
@@ -235,15 +250,18 @@ def cmd_config_show(args: argparse.Namespace) -> None:
 # setup
 # ---------------------------------------------------------------------------
 
+
 def cmd_setup(args: argparse.Namespace) -> None:
     """Download the Meilisearch binary for the current platform."""
     from local_search_agent.core.meilisearch_manager import run_setup
+
     run_setup(force=args.force)
 
 
 # ---------------------------------------------------------------------------
 # serve
 # ---------------------------------------------------------------------------
+
 
 def cmd_serve(args: argparse.Namespace) -> None:
     """Start the FastAPI file server, optionally with the incremental scheduler."""
@@ -281,9 +299,11 @@ def cmd_serve(args: argparse.Namespace) -> None:
 # workspace
 # ---------------------------------------------------------------------------
 
+
 def cmd_workspace_create(args: argparse.Namespace) -> None:
     from local_search_agent.workspace.metadata_db import MetadataDB
     from local_search_agent.workspace.workspace_manager import WorkspaceManager
+
     wm = WorkspaceManager(db_path=args.db)
     mdb = MetadataDB(db_path=args.db)
     wm.create_workspace(name=args.name, document_dir=args.dir)
@@ -294,6 +314,7 @@ def cmd_workspace_create(args: argparse.Namespace) -> None:
 def cmd_workspace_list(args: argparse.Namespace) -> None:
     from local_search_agent.core.config import SearchAgentConfig
     from local_search_agent.core.framework import SearchAgentFramework
+
     config = SearchAgentConfig(workspace_name="default", db_path=args.db)
     framework = SearchAgentFramework(config)
     workspaces = framework.list_workspaces()
@@ -309,6 +330,7 @@ def cmd_workspace_list(args: argparse.Namespace) -> None:
 def cmd_workspace_delete(args: argparse.Namespace) -> None:
     from local_search_agent.core.config import SearchAgentConfig
     from local_search_agent.core.framework import SearchAgentFramework
+
     config = SearchAgentConfig(workspace_name=args.name, db_path=args.db)
     framework = SearchAgentFramework(config)
     framework.delete_workspace(name=args.name, wipe_index=args.wipe)
@@ -318,6 +340,7 @@ def cmd_workspace_delete(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 # ingest
 # ---------------------------------------------------------------------------
+
 
 def cmd_ingest(args: argparse.Namespace) -> None:
     from local_search_agent.core.config import SearchAgentConfig
@@ -353,6 +376,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
 # query
 # ---------------------------------------------------------------------------
 
+
 def cmd_query(args: argparse.Namespace) -> None:
     from local_search_agent.core.config import SearchAgentConfig
     from local_search_agent.core.framework import SearchAgentFramework
@@ -378,6 +402,7 @@ def cmd_query(args: argparse.Namespace) -> None:
         try:
             from rich.console import Console
             from rich.status import Status
+
             console = Console()
             with Status("[cyan]Searching...[/cyan]", console=console):
                 response = framework.query(question=args.question, workspace=args.workspace)
@@ -397,13 +422,16 @@ def cmd_query(args: argparse.Namespace) -> None:
         from rich.console import Console
         from rich.prompt import Prompt
         from rich.status import Status
+
         console = Console()
         console.print(
             f"  Workspace: [bold cyan]{args.workspace}[/bold cyan]  "
             f"Provider: [bold cyan]{provider}[/bold cyan]  "
             f"Model: [bold cyan]{args.model}[/bold cyan]"
         )
-        console.print("  Type your question and press Enter. Type [bold]exit[/bold] or Ctrl+C to quit.\n")
+        console.print(
+            "  Type your question and press Enter. Type [bold]exit[/bold] or Ctrl+C to quit.\n"
+        )
         use_rich = True
     except ImportError:
         console = None
@@ -445,10 +473,10 @@ def cmd_query(args: argparse.Namespace) -> None:
         _print_answer(response["answer"], response["iterations_used"], response["truncated"])
 
 
-
 # ---------------------------------------------------------------------------
 # scheduler
 # ---------------------------------------------------------------------------
+
 
 def cmd_scheduler_start(args: argparse.Namespace) -> None:
     """Start the incremental scheduler as a foreground process (blocks)."""
@@ -507,9 +535,12 @@ def cmd_scheduler_status(args: argparse.Namespace) -> None:
     print(f"Scheduler running — {len(jobs)} job(s)")
     print("-" * 60)
     for job in jobs:
-        print(f"  workspace={job.get('workspace', '?'):<25} "
-              f"interval={job.get('interval_minutes', '?')}m  "
-              f"next_run={job.get('next_run', 'unknown')}")
+        print(
+            f"  workspace={job.get('workspace', '?'):<25} "
+            f"interval={job.get('interval_minutes', '?')}m  "
+            f"next_run={job.get('next_run', 'unknown')}"
+        )
+
 
 def cmd_scheduler_trigger(args: argparse.Namespace) -> None:
     """Trigger an immediate sync for a workspace."""
@@ -533,6 +564,7 @@ def cmd_scheduler_trigger(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 # health
 # ---------------------------------------------------------------------------
+
 
 def cmd_health(args: argparse.Namespace) -> None:
     """Show index health and freshness across all workspaces."""
@@ -586,9 +618,11 @@ def cmd_health(args: argparse.Namespace) -> None:
 # ui (desktop dashboard)
 # ---------------------------------------------------------------------------
 
+
 def cmd_ui(args: argparse.Namespace) -> None:
     """Open the desktop dashboard window."""
     from local_search_agent.ui.dashboard import run
+
     run(
         host=args.host,
         port=args.port,
@@ -606,17 +640,21 @@ def cmd_ui(args: argparse.Namespace) -> None:
 # Parser assembly
 # ---------------------------------------------------------------------------
 
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="local-search",
         description="Local Search Agent — deterministic, auditable local document RAG.",
     )
     _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    parser.add_argument("--db", default=os.environ.get("LSA_DB_PATH",
-                        os.path.join(_project_root, "local_search_agent.db")),
-                        help="SQLite metadata database path.")
-    parser.add_argument("--log-level", default="INFO",
-                        choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser.add_argument(
+        "--db",
+        default=os.environ.get("LSA_DB_PATH", os.path.join(_project_root, "local_search_agent.db")),
+        help="SQLite metadata database path.",
+    )
+    parser.add_argument(
+        "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"]
+    )
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -625,33 +663,38 @@ def build_parser() -> argparse.ArgumentParser:
     config_sub = p_config.add_subparsers(dest="config_command", required=True)
 
     p_cfg_set = config_sub.add_parser("set-key", help="Save an API key for a provider.")
-    p_cfg_set.add_argument("--provider", required=True,
-                           choices=["google", "openai", "anthropic"],
-                           help="LLM provider.")
+    p_cfg_set.add_argument(
+        "--provider", required=True, choices=["google", "openai", "anthropic"], help="LLM provider."
+    )
     p_cfg_set.add_argument("--key", required=True, help="Your API key.")
     p_cfg_set.set_defaults(func=cmd_config_set_key)
 
     p_cfg_del = config_sub.add_parser("delete-key", help="Remove a saved API key.")
-    p_cfg_del.add_argument("--provider", required=True,
-                           choices=["google", "openai", "anthropic"])
+    p_cfg_del.add_argument("--provider", required=True, choices=["google", "openai", "anthropic"])
     p_cfg_del.set_defaults(func=cmd_config_delete_key)
 
     p_cfg_list = config_sub.add_parser("list-keys", help="List all saved API keys (masked).")
     p_cfg_list.set_defaults(func=cmd_config_list_keys)
 
     p_cfg_add_model = config_sub.add_parser("add-model", help="Add a model name for a provider.")
-    p_cfg_add_model.add_argument("--provider", required=True,
-                                 choices=["google", "openai", "anthropic", "ollama"])
+    p_cfg_add_model.add_argument(
+        "--provider", required=True, choices=["google", "openai", "anthropic", "ollama"]
+    )
     p_cfg_add_model.add_argument("--model-name", required=True, help="Model name to add.")
     p_cfg_add_model.set_defaults(func=cmd_config_add_model)
 
-    p_cfg_del_model = config_sub.add_parser("delete-model", help="Remove a model name for a provider.")
-    p_cfg_del_model.add_argument("--provider", required=True,
-                                 choices=["google", "openai", "anthropic", "ollama"])
+    p_cfg_del_model = config_sub.add_parser(
+        "delete-model", help="Remove a model name for a provider."
+    )
+    p_cfg_del_model.add_argument(
+        "--provider", required=True, choices=["google", "openai", "anthropic", "ollama"]
+    )
     p_cfg_del_model.add_argument("--model-name", required=True, help="Model name to remove.")
     p_cfg_del_model.set_defaults(func=cmd_config_delete_model)
 
-    p_cfg_list_models = config_sub.add_parser("list-models", help="List all saved model names per provider.")
+    p_cfg_list_models = config_sub.add_parser(
+        "list-models", help="List all saved model names per provider."
+    )
     p_cfg_list_models.set_defaults(func=cmd_config_list_models)
 
     p_cfg_semantic = config_sub.add_parser(
@@ -675,7 +718,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_cfg_show_semantic.set_defaults(func=cmd_config_show_semantic)
 
-    p_cfg_show = config_sub.add_parser("show", help="Show all current config (keys, models, semantic, LangSmith).")
+    p_cfg_show = config_sub.add_parser(
+        "show", help="Show all current config (keys, models, semantic, LangSmith)."
+    )
     p_cfg_show.set_defaults(func=cmd_config_show)
 
     # ── setup ───────────────────────────────────────────────────────────
@@ -698,10 +743,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--meili-url", default="http://localhost:7700")
     p_serve.add_argument("--meili-key", default="local_search_master_key")
     p_serve.add_argument("--dirs", nargs="*", metavar="DIR")
-    p_serve.add_argument("--scheduler", action="store_true",
-                         help="Also start the incremental sync scheduler.")
-    p_serve.add_argument("--interval", type=int, default=15,
-                         help="Scheduler interval in minutes (default 15).")
+    p_serve.add_argument(
+        "--scheduler", action="store_true", help="Also start the incremental sync scheduler."
+    )
+    p_serve.add_argument(
+        "--interval", type=int, default=15, help="Scheduler interval in minutes (default 15)."
+    )
     p_serve.set_defaults(func=cmd_serve)
 
     # ── workspace ──────────────────────────────────────────────────────
@@ -718,8 +765,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_ws_delete = ws_sub.add_parser("delete", help="Delete a workspace.")
     p_ws_delete.add_argument("name")
-    p_ws_delete.add_argument("--wipe", action="store_true",
-                             help="Also delete all documents from the Meilisearch index.")
+    p_ws_delete.add_argument(
+        "--wipe", action="store_true", help="Also delete all documents from the Meilisearch index."
+    )
     p_ws_delete.set_defaults(func=cmd_workspace_delete)
 
     # ── ingest ─────────────────────────────────────────────────────────
@@ -728,19 +776,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument("--dirs", nargs="+", required=True, metavar="DIR")
     p_ingest.add_argument("--meili-url", default="http://localhost:7700")
     p_ingest.add_argument("--meili-key", default="local_search_master_key")
-    p_ingest.add_argument("--force", action="store_true",
-                          help="Force full re-index (ignore delta logic).")
-    p_ingest.add_argument("--wipe", action="store_true",
-                          help="Wipe the index and all DB records, then force full re-ingest.")
+    p_ingest.add_argument(
+        "--force", action="store_true", help="Force full re-index (ignore delta logic)."
+    )
+    p_ingest.add_argument(
+        "--wipe",
+        action="store_true",
+        help="Wipe the index and all DB records, then force full re-ingest.",
+    )
     p_ingest.set_defaults(func=cmd_ingest)
 
     # ── query ──────────────────────────────────────────────────────────
     p_query = sub.add_parser("query", help="Ask the agent a question.")
-    p_query.add_argument("question", nargs="?",
-                         help="Question to ask. Omit for interactive mode.")
+    p_query.add_argument("question", nargs="?", help="Question to ask. Omit for interactive mode.")
     p_query.add_argument("--workspace", default="default")
-    p_query.add_argument("--provider", default="google",
-                         choices=["google", "ollama", "openai", "anthropic"])
+    p_query.add_argument(
+        "--provider", default="google", choices=["google", "ollama", "openai", "anthropic"]
+    )
     p_query.add_argument("--model", default="gemma-4-31b-it")
     p_query.add_argument("--api-key", default=None)
     p_query.add_argument("--meili-url", default="http://localhost:7700")
@@ -758,50 +810,66 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_sched_status.set_defaults(func=cmd_scheduler_status)
 
-    p_sched_start = sched_sub.add_parser(
-        "start", help="Run the scheduler as a foreground process."
-    )
+    p_sched_start = sched_sub.add_parser("start", help="Run the scheduler as a foreground process.")
     p_sched_start.add_argument("--workspace", default="default")
     p_sched_start.add_argument("--dirs", nargs="*", metavar="DIR")
     p_sched_start.add_argument("--meili-url", default="http://localhost:7700")
     p_sched_start.add_argument("--meili-key", default="local_search_master_key")
-    p_sched_start.add_argument("--interval", type=int, default=15,
-                                help="Sync interval in minutes (default 15).")
+    p_sched_start.add_argument(
+        "--interval", type=int, default=15, help="Sync interval in minutes (default 15)."
+    )
     p_sched_start.set_defaults(func=cmd_scheduler_start)
 
-    p_sched_trigger = sched_sub.add_parser(
-        "trigger", help="Trigger an immediate one-off sync."
-    )
+    p_sched_trigger = sched_sub.add_parser("trigger", help="Trigger an immediate one-off sync.")
     p_sched_trigger.add_argument("--workspace", default="default")
     p_sched_trigger.add_argument("--dirs", nargs="*", metavar="DIR")
     p_sched_trigger.add_argument("--meili-url", default="http://localhost:7700")
     p_sched_trigger.add_argument("--meili-key", default="local_search_master_key")
-    p_sched_trigger.add_argument("--force", action="store_true",
-                                  help="Force full re-index.")
+    p_sched_trigger.add_argument("--force", action="store_true", help="Force full re-index.")
     p_sched_trigger.set_defaults(func=cmd_scheduler_trigger)
 
     # ── health ─────────────────────────────────────────────────────────
     p_health = sub.add_parser("health", help="Show index health across all workspaces.")
-    p_health.add_argument("--stale-threshold", type=int, default=30,
-                           help="Minutes after which a workspace is considered stale (default 30).")
+    p_health.add_argument(
+        "--stale-threshold",
+        type=int,
+        default=30,
+        help="Minutes after which a workspace is considered stale (default 30).",
+    )
     p_health.set_defaults(func=cmd_health)
 
     # ── ui ─────────────────────────────────────────────────────────────
     p_ui = sub.add_parser("ui", help="Open the desktop dashboard.")
-    p_ui.add_argument("--host", default=os.environ.get("LSA_HOST", "127.0.0.1"),
-                      help="Host for the dashboard API server (default 127.0.0.1).")
-    p_ui.add_argument("--port", type=int, default=int(os.environ.get("LSA_PORT", "8765")),
-                      help="Port for the dashboard API server (default 8765).")
-    p_ui.add_argument("--provider", default=os.environ.get("LSA_PROVIDER", "google"),
-                      choices=["google", "ollama", "openai", "anthropic"])
+    p_ui.add_argument(
+        "--host",
+        default=os.environ.get("LSA_HOST", "127.0.0.1"),
+        help="Host for the dashboard API server (default 127.0.0.1).",
+    )
+    p_ui.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("LSA_PORT", "8765")),
+        help="Port for the dashboard API server (default 8765).",
+    )
+    p_ui.add_argument(
+        "--provider",
+        default=os.environ.get("LSA_PROVIDER", "google"),
+        choices=["google", "ollama", "openai", "anthropic"],
+    )
     p_ui.add_argument("--model", default=os.environ.get("LSA_MODEL", "gemma-4-31b-it"))
     p_ui.add_argument("--meili-url", default=os.environ.get("MEILI_URL", "http://localhost:7700"))
-    p_ui.add_argument("--meili-key",
-                      default=os.environ.get("MEILI_MASTER_KEY", "local_search_master_key"))
-    p_ui.add_argument("--scheduler-interval", type=int, default=0,
-                      help="Start ingestion scheduler with this interval in minutes (0 = disabled).")
-    p_ui.add_argument("--headless", action="store_true",
-                      help="Run API server only, no window (for debugging).")
+    p_ui.add_argument(
+        "--meili-key", default=os.environ.get("MEILI_MASTER_KEY", "local_search_master_key")
+    )
+    p_ui.add_argument(
+        "--scheduler-interval",
+        type=int,
+        default=0,
+        help="Start ingestion scheduler with this interval in minutes (0 = disabled).",
+    )
+    p_ui.add_argument(
+        "--headless", action="store_true", help="Run API server only, no window (for debugging)."
+    )
     p_ui.set_defaults(func=cmd_ui)
 
     return parser

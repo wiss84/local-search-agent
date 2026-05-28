@@ -154,17 +154,13 @@ class MetadataDB:
     def get_sync_job(self, workspace: str) -> Optional[dict]:
         """Return the sync job record for a workspace, or None if not found."""
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM sync_jobs WHERE workspace=?", (workspace,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM sync_jobs WHERE workspace=?", (workspace,)).fetchone()
         return dict(row) if row else None
 
     def list_sync_jobs(self) -> list[dict]:
         """Return all sync job records ordered by workspace name."""
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM sync_jobs ORDER BY workspace"
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM sync_jobs ORDER BY workspace").fetchall()
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
@@ -241,6 +237,7 @@ class MetadataDB:
         or have never been synced. Used by the monitor to flag stale indexes.
         """
         from datetime import timedelta
+
         threshold = (
             datetime.now().astimezone() - timedelta(minutes=older_than_minutes)
         ).isoformat()

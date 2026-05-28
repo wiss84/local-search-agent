@@ -27,6 +27,7 @@ from local_search_agent.core.config import SearchAgentConfig
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def config(tmp_path):
     return SearchAgentConfig(
@@ -62,6 +63,7 @@ def mock_meili():
 # System prompt
 # ---------------------------------------------------------------------------
 
+
 class TestSystemPrompt:
     def test_contains_workspace_name(self):
         prompt = build_system_prompt("finance", ["/shares/finance"])
@@ -89,9 +91,11 @@ class TestSystemPrompt:
 # Search tool output
 # ---------------------------------------------------------------------------
 
+
 class TestSearchTool:
     def test_formats_results_correctly(self, config, mock_meili):
         from local_search_agent.agent.tools.search_tool import build_search_tool
+
         tool = build_search_tool(mock_meili, config)
         result = tool.invoke({"query": "AWS spend Q3 2024"})
 
@@ -103,6 +107,7 @@ class TestSearchTool:
 
     def test_no_results_returns_helpful_message(self, config, mock_meili):
         from local_search_agent.agent.tools.search_tool import build_search_tool
+
         mock_meili.search.return_value = []
         tool = build_search_tool(mock_meili, config)
         result = tool.invoke({"query": "something obscure"})
@@ -112,6 +117,7 @@ class TestSearchTool:
 
     def test_search_failure_returns_error_string(self, config, mock_meili):
         from local_search_agent.agent.tools.search_tool import build_search_tool
+
         mock_meili.search.side_effect = RuntimeError("Meilisearch down")
         tool = build_search_tool(mock_meili, config)
         result = tool.invoke({"query": "test"})
@@ -121,6 +127,7 @@ class TestSearchTool:
 
     def test_top_k_capped_at_20(self, config, mock_meili):
         from local_search_agent.agent.tools.search_tool import build_search_tool
+
         tool = build_search_tool(mock_meili, config)
         tool.invoke({"query": "test", "top_k": 999})
 
@@ -129,6 +136,7 @@ class TestSearchTool:
 
     def test_file_type_filter_applied(self, config, mock_meili):
         from local_search_agent.agent.tools.search_tool import build_search_tool
+
         tool = build_search_tool(mock_meili, config)
         tool.invoke({"query": "policy", "file_type": "pdf"})
 
@@ -140,9 +148,11 @@ class TestSearchTool:
 # Fetch tool output
 # ---------------------------------------------------------------------------
 
+
 class TestFetchTool:
     def test_returns_document_text_on_success(self, config):
         from local_search_agent.agent.tools.fetch_tool import build_fetch_tool
+
         tool = build_fetch_tool(config)
 
         mock_response = MagicMock()
@@ -157,6 +167,7 @@ class TestFetchTool:
 
     def test_returns_error_on_404(self, config):
         from local_search_agent.agent.tools.fetch_tool import build_fetch_tool
+
         tool = build_fetch_tool(config)
 
         mock_response = MagicMock()
@@ -170,6 +181,7 @@ class TestFetchTool:
 
     def test_returns_error_on_410(self, config):
         from local_search_agent.agent.tools.fetch_tool import build_fetch_tool
+
         tool = build_fetch_tool(config)
 
         mock_response = MagicMock()
@@ -185,6 +197,7 @@ class TestFetchTool:
         import httpx
 
         from local_search_agent.agent.tools.fetch_tool import build_fetch_tool
+
         tool = build_fetch_tool(config)
 
         with patch("httpx.get", side_effect=httpx.ConnectError("refused")):
@@ -195,6 +208,7 @@ class TestFetchTool:
 
     def test_truncates_large_documents(self, config):
         from local_search_agent.agent.tools.fetch_tool import _MAX_FETCH_CHARS, build_fetch_tool
+
         tool = build_fetch_tool(config)
 
         large_text = "A" * (_MAX_FETCH_CHARS + 5000)
@@ -213,6 +227,7 @@ class TestFetchTool:
 # Agent response extraction
 # ---------------------------------------------------------------------------
 
+
 class TestAgentResponseExtraction:
     def _make_agent(self, config, mock_meili):
         agent = LocalSearchAgent(config=config, meili_client=mock_meili)
@@ -223,12 +238,17 @@ class TestAgentResponseExtraction:
         state: AgentState = {
             "messages": [
                 HumanMessage(content="What was AWS spend?"),
-                AIMessage(content="", tool_calls=[{"name": "search_local_index",
-                                                    "args": {"query": "AWS spend"},
-                                                    "id": "tc1"}]),
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "search_local_index", "args": {"query": "AWS spend"}, "id": "tc1"}
+                    ],
+                ),
                 ToolMessage(content="Found 1 result...", tool_call_id="tc1"),
-                AIMessage(content="AWS spend on Project Alpha was $1.2M in Q3 2024. "
-                                  "Source: http://localhost:8000/docs/abc123def456abcd"),
+                AIMessage(
+                    content="AWS spend on Project Alpha was $1.2M in Q3 2024. "
+                    "Source: http://localhost:8000/docs/abc123def456abcd"
+                ),
             ],
             "iterations": 1,
             "sources_seen": {"abc123def456abcd"},
@@ -258,7 +278,7 @@ class TestAgentResponseExtraction:
                 HumanMessage(content="test"),
                 AIMessage(content="Partial answer based on limited search."),
             ],
-            "iterations": config.max_iterations,   # at the limit
+            "iterations": config.max_iterations,  # at the limit
             "sources_seen": set(),
             "truncated": False,
         }
@@ -271,11 +291,13 @@ class TestAgentResponseExtraction:
         state: AgentState = {
             "messages": [
                 HumanMessage(content="test"),
-                AIMessage(content=(
-                    "The AWS spend was $1.2M. "
-                    "Source: http://localhost:8000/docs/abc123def456abcd\n"
-                    "See also: http://localhost:8000/docs/ffff000011112222"
-                )),
+                AIMessage(
+                    content=(
+                        "The AWS spend was $1.2M. "
+                        "Source: http://localhost:8000/docs/abc123def456abcd\n"
+                        "See also: http://localhost:8000/docs/ffff000011112222"
+                    )
+                ),
             ],
             "iterations": 1,
             "sources_seen": set(),
@@ -306,21 +328,25 @@ class TestAgentResponseExtraction:
 # Provider factory — import error handling
 # ---------------------------------------------------------------------------
 
+
 class TestProviderFactory:
     def test_unknown_provider_raises_value_error(self, config):
         from local_search_agent.agent.provider_factory import build_llm
+
         config.provider = "unknown_provider"
         with pytest.raises(ValueError, match="Unknown provider"):
             build_llm(config)
 
     def test_google_missing_api_key_raises(self, config):
         from local_search_agent.agent.provider_factory import _build_google
+
         config.api_key = None
         with pytest.raises(ValueError, match="api_key is required"):
             _build_google(config)
 
     def test_openai_missing_api_key_raises(self, config):
         from local_search_agent.agent.provider_factory import _build_openai
+
         config.provider = "openai"
         config.api_key = None
         with pytest.raises(ValueError, match="api_key is required"):

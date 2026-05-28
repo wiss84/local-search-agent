@@ -66,15 +66,16 @@ _HEADING_RE = re.compile(r"^#{1,6}\s+.+$")
 _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
 
 # Break-point priority values (higher = stronger preference for cutting here)
-_BP_HEADING   = 4
+_BP_HEADING = 4
 _BP_DOUBLE_NL = 3
 _BP_SINGLE_NL = 2
-_BP_SENTENCE  = 1
+_BP_SENTENCE = 1
 
 
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def chunk_document(node: DocumentNode) -> list[DocumentNode]:
     """
@@ -91,7 +92,8 @@ def chunk_document(node: DocumentNode) -> list[DocumentNode]:
     if len(text) < CHUNK_MIN_CHARS:
         logger.debug(
             "Skipping chunking for short document %r (%d chars)",
-            node.title, len(text),
+            node.title,
+            len(text),
         )
         return [node]
 
@@ -119,6 +121,7 @@ def chunk_document(node: DocumentNode) -> list[DocumentNode]:
 # ---------------------------------------------------------------------------
 # Strategy 1 — Table / CSV row splitting
 # ---------------------------------------------------------------------------
+
 
 def _is_table_document(text: str) -> bool:
     """Return True if the majority of non-empty lines look like Markdown table rows."""
@@ -153,11 +156,11 @@ def _chunk_table(text: str) -> list[str]:
         if table_lines[i].strip().startswith("|"):
             last_table_idx = i + 1
             break
-    post_table  = table_lines[last_table_idx:]
+    post_table = table_lines[last_table_idx:]
     table_lines = table_lines[:last_table_idx]
 
     header_rows: list[str] = []
-    data_rows:   list[str] = []
+    data_rows: list[str] = []
     separator_found = False
 
     for ln in table_lines:
@@ -177,12 +180,12 @@ def _chunk_table(text: str) -> list[str]:
         return [text]
 
     header_block = "\n".join(header_rows)
-    pre_block    = "\n".join(pre_table).strip()
-    post_block   = "\n".join(post_table).strip()
+    pre_block = "\n".join(pre_table).strip()
+    post_block = "\n".join(post_table).strip()
 
     chunks: list[str] = []
     for i in range(0, max(len(data_rows), 1), TABLE_ROWS_PER_CHUNK):
-        row_slice = data_rows[i: i + TABLE_ROWS_PER_CHUNK]
+        row_slice = data_rows[i : i + TABLE_ROWS_PER_CHUNK]
         chunk = f"{header_block}\n" + "\n".join(row_slice)
         chunk = chunk.strip()
         if i == 0 and pre_block:
@@ -197,6 +200,7 @@ def _chunk_table(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # Strategy 2 — Sliding-window with overlap  (all non-table documents)
 # ---------------------------------------------------------------------------
+
 
 def _find_break_points(text: str) -> list[tuple[int, int]]:
     """
@@ -216,9 +220,9 @@ def _find_break_points(text: str) -> list[tuple[int, int]]:
     prev_was_heading = False
 
     for line in lines:
-        end    = cursor + len(line)
+        end = cursor + len(line)
         stripped = line.rstrip("\n\r")
-        is_blank   = stripped.strip() == ""
+        is_blank = stripped.strip() == ""
         is_heading = bool(_HEADING_RE.match(stripped))
 
         if is_blank:
@@ -258,12 +262,12 @@ def _chunk_sliding(text: str) -> list[str]:
     bp_positions: list[int] = sorted(bp_map)
 
     chunks: list[str] = []
-    start          = 0       # current chunk start in original text
-    overlap_prefix = ""      # tail of previous chunk
+    start = 0  # current chunk start in original text
+    overlap_prefix = ""  # tail of previous chunk
 
     while start < len(text):
         target_end = start + CHUNK_TARGET_CHARS
-        hard_end   = start + CHUNK_MAX_CHARS
+        hard_end = start + CHUNK_MAX_CHARS
 
         if target_end >= len(text):
             # Everything remaining fits — take it all
@@ -286,7 +290,7 @@ def _chunk_sliding(text: str) -> list[str]:
                 break
             pri = bp_map[pos]
             if pos < target_end:
-                fallback_pos = pos          # keep updating — want the last one
+                fallback_pos = pos  # keep updating — want the last one
             else:
                 # In the target → hard window: pick highest priority
                 if pri > best_pri:
@@ -298,16 +302,14 @@ def _chunk_sliding(text: str) -> list[str]:
             # or force-cut at hard_end if there's nothing at all.
             best_pos = fallback_pos if fallback_pos is not None else hard_end
 
-        chunk_raw  = text[start:best_pos]
+        chunk_raw = text[start:best_pos]
         chunk_full = (overlap_prefix + chunk_raw).strip()
         if chunk_full:
             chunks.append(chunk_full)
 
         # Overlap: last N chars of the raw (non-prefixed) section
         overlap_prefix = (
-            chunk_raw[-CHUNK_OVERLAP_CHARS:]
-            if len(chunk_raw) > CHUNK_OVERLAP_CHARS
-            else chunk_raw
+            chunk_raw[-CHUNK_OVERLAP_CHARS:] if len(chunk_raw) > CHUNK_OVERLAP_CHARS else chunk_raw
         )
         start = best_pos
 
@@ -317,6 +319,7 @@ def _chunk_sliding(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # DocumentNode factory helpers
 # ---------------------------------------------------------------------------
+
 
 def _chunk_doc_id(source_path: str, index: int) -> str:
     key = f"{source_path}:chunk:{index}"

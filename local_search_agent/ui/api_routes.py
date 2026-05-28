@@ -54,15 +54,16 @@ logger = logging.getLogger(__name__)
 # read by the /ingest/status endpoint. One slot per workspace.
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _IngestProgress:
     workspace: str
-    status: str = "idle"          # "running" | "done" | "error"
-    files_total: int = 0           # total source files discovered
-    files_processed: int = 0       # source files processed so far
-    files_skipped: int = 0         # source files skipped (unchanged)
-    files_failed: int = 0          # source files that errored
-    chunks_indexed: int = 0        # total chunks written to Meilisearch
+    status: str = "idle"  # "running" | "done" | "error"
+    files_total: int = 0  # total source files discovered
+    files_processed: int = 0  # source files processed so far
+    files_skipped: int = 0  # source files skipped (unchanged)
+    files_failed: int = 0  # source files that errored
+    chunks_indexed: int = 0  # total chunks written to Meilisearch
     current_file: str = ""
     error: str = ""
     started_at: float = field(default_factory=time.monotonic)
@@ -75,17 +76,17 @@ class _IngestProgress:
 
     def to_dict(self) -> dict:
         return {
-            "workspace":       self.workspace,
-            "status":          self.status,
-            "total":           self.files_total,
-            "processed":       self.files_processed,
-            "skipped":         self.files_skipped,
-            "failed":          self.files_failed,
-            "indexed":         self.chunks_indexed,
-            "current_file":    self.current_file,
-            "error":           self.error,
-            "elapsed_s":       self.elapsed_s,
-            "doc_count":       self.chunks_indexed,
+            "workspace": self.workspace,
+            "status": self.status,
+            "total": self.files_total,
+            "processed": self.files_processed,
+            "skipped": self.files_skipped,
+            "failed": self.files_failed,
+            "indexed": self.chunks_indexed,
+            "current_file": self.current_file,
+            "error": self.error,
+            "elapsed_s": self.elapsed_s,
+            "doc_count": self.chunks_indexed,
         }
 
 
@@ -100,6 +101,7 @@ _ingest_registry: dict[str, _IngestProgress] = {}
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _normalise_dirs(ws: dict) -> list[str]:
     """
     WorkspaceManager stores document_dir as a single TEXT column.
@@ -113,6 +115,7 @@ def _normalise_dirs(ws: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 # Pydantic request bodies
 # ---------------------------------------------------------------------------
+
 
 class QueryRequest(BaseModel):
     session_id: str
@@ -177,6 +180,7 @@ class IngestRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
+
 
 def build_ui_router(app_state) -> APIRouter:
     """
@@ -305,12 +309,14 @@ def build_ui_router(app_state) -> APIRouter:
     async def get_keys() -> JSONResponse:
         """Return all saved API keys, masked."""
         from local_search_agent.core.key_manager import list_keys
+
         return JSONResponse({"keys": list_keys()})
 
     @router.post("/keys")
     async def set_key(body: ApiKeyRequest) -> JSONResponse:
         """Save an API key for a provider."""
         from local_search_agent.core.key_manager import set_key
+
         try:
             set_key(body.provider, body.key)
             # Hot-reload: if active provider matches, refresh the config's api_key
@@ -325,6 +331,7 @@ def build_ui_router(app_state) -> APIRouter:
     async def delete_key(body: ApiKeyDeleteRequest) -> JSONResponse:
         """Remove a saved API key for a provider."""
         from local_search_agent.core.key_manager import delete_key
+
         deleted = delete_key(body.provider)
         if app_state.config.provider == body.provider:
             app_state.config.api_key = None
@@ -339,12 +346,14 @@ def build_ui_router(app_state) -> APIRouter:
     async def get_langsmith() -> JSONResponse:
         """Return current LangSmith config (api_key masked)."""
         from local_search_agent.core.key_manager import get_langsmith
+
         return JSONResponse(get_langsmith())
 
     @router.post("/langsmith")
     async def set_langsmith(body: LangSmithRequest) -> JSONResponse:
         """Save LangSmith credentials and activate tracing immediately."""
         from local_search_agent.core.key_manager import set_langsmith
+
         try:
             set_langsmith(api_key=body.api_key, project=body.project)
             return JSONResponse({"ok": True})
@@ -355,6 +364,7 @@ def build_ui_router(app_state) -> APIRouter:
     async def delete_langsmith() -> JSONResponse:
         """Remove LangSmith credentials and deactivate tracing."""
         from local_search_agent.core.key_manager import delete_langsmith
+
         deleted = delete_langsmith()
         return JSONResponse({"ok": True, "deleted": deleted})
 
@@ -366,15 +376,18 @@ def build_ui_router(app_state) -> APIRouter:
     async def get_models() -> JSONResponse:
         """Return all stored models grouped by provider."""
         from local_search_agent.core.key_manager import get_models
+
         return JSONResponse({"models": get_models()})
 
     @router.post("/models")
     async def add_model(body: ModelAddRequest) -> JSONResponse:
         """Add a model name for a provider."""
         from local_search_agent.core.key_manager import add_model
+
         try:
             add_model(body.provider, body.model_name)
             from local_search_agent.core.key_manager import get_models
+
             return JSONResponse({"ok": True, "models": get_models()})
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -383,6 +396,7 @@ def build_ui_router(app_state) -> APIRouter:
     async def delete_model(body: ModelDeleteRequest) -> JSONResponse:
         """Remove a model name for a provider."""
         from local_search_agent.core.key_manager import delete_model, get_models
+
         deleted = delete_model(body.provider, body.model_name)
         return JSONResponse({"ok": True, "deleted": deleted, "models": get_models()})
 
@@ -394,6 +408,7 @@ def build_ui_router(app_state) -> APIRouter:
     async def get_semantic_settings() -> JSONResponse:
         """Return current semantic feature flags from settings.json."""
         from local_search_agent.core.key_manager import get_semantic_settings
+
         return JSONResponse(get_semantic_settings())
 
     @router.post("/settings/semantic")
@@ -407,9 +422,9 @@ def build_ui_router(app_state) -> APIRouter:
 
         prev_link_graph = app_state.config.enable_link_graph
 
-        app_state.config.enable_semantic        = body.enable_semantic
+        app_state.config.enable_semantic = body.enable_semantic
         app_state.config.enable_query_expansion = body.enable_query_expansion
-        app_state.config.enable_link_graph      = body.enable_link_graph
+        app_state.config.enable_link_graph = body.enable_link_graph
 
         # Persist to settings.json — single source of truth
         set_all_semantic_settings(
@@ -426,12 +441,14 @@ def build_ui_router(app_state) -> APIRouter:
                 body.enable_link_graph,
             )
 
-        return JSONResponse({
-            "ok": True,
-            "enable_semantic":        app_state.config.enable_semantic,
-            "enable_query_expansion": app_state.config.enable_query_expansion,
-            "enable_link_graph":      app_state.config.enable_link_graph,
-        })
+        return JSONResponse(
+            {
+                "ok": True,
+                "enable_semantic": app_state.config.enable_semantic,
+                "enable_query_expansion": app_state.config.enable_query_expansion,
+                "enable_link_graph": app_state.config.enable_link_graph,
+            }
+        )
 
     # ----------------------------------------------------------------
     # Ingestion
@@ -446,7 +463,12 @@ def build_ui_router(app_state) -> APIRouter:
         """
         loop = asyncio.get_event_loop()
         loop.run_in_executor(None, _run_ingest, app_state, body.workspace, body.force)
-        return JSONResponse({"ok": True, "message": f"Ingestion started for {body.workspace!r} (force={body.force})."})
+        return JSONResponse(
+            {
+                "ok": True,
+                "message": f"Ingestion started for {body.workspace!r} (force={body.force}).",
+            }
+        )
 
     @router.post("/ingest/wipe")
     async def ingest_wipe(body: IngestRequest) -> JSONResponse:
@@ -461,10 +483,12 @@ def build_ui_router(app_state) -> APIRouter:
                 None,
                 lambda: app_state.framework.wipe_and_reingest(workspace_name=workspace),
             )
-            return JSONResponse({
-                "ok": True,
-                "message": f"Wipe and re-ingest started for {workspace!r}.",
-            })
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "message": f"Wipe and re-ingest started for {workspace!r}.",
+                }
+            )
         except Exception as e:
             logger.exception("Wipe & re-ingest failed for %r: %s", workspace, e)
             raise HTTPException(status_code=500, detail=str(e))
@@ -489,6 +513,7 @@ def build_ui_router(app_state) -> APIRouter:
             if ws is None:
                 raise HTTPException(404, detail=f"Workspace {body.workspace!r} not found.")
             from local_search_agent.core.config import SearchAgentConfig
+
             ws_config = SearchAgentConfig(
                 workspace_name=body.workspace,
                 document_dirs=_normalise_dirs(ws),
@@ -504,6 +529,7 @@ def build_ui_router(app_state) -> APIRouter:
                 def _cb(indexed, skipped, failed, total, current_file):
                     import os as _os
                     import time as _time
+
                     with _ingest_lock:
                         prog = _ingest_registry.get(ws_name)
                         if prog is None or prog.status not in ("running",):
@@ -513,14 +539,19 @@ def build_ui_router(app_state) -> APIRouter:
                                 started_at=_time.monotonic(),
                             )
                             _ingest_registry[ws_name] = prog
-                        prog.files_total     = total
+                        prog.files_total = total
                         prog.files_processed = indexed + skipped + failed
-                        prog.files_skipped   = skipped
-                        prog.files_failed    = failed
-                        prog.current_file    = _os.path.basename(current_file) if current_file not in ("", "__done__") else ""
+                        prog.files_skipped = skipped
+                        prog.files_failed = failed
+                        prog.current_file = (
+                            _os.path.basename(current_file)
+                            if current_file not in ("", "__done__")
+                            else ""
+                        )
                         if current_file == "__done__":
-                            prog.status      = "done"
+                            prog.status = "done"
                             prog.finished_at = _time.monotonic()
+
                 return _cb
 
             app_state.scheduler.add_workspace(
@@ -567,6 +598,7 @@ def build_ui_router(app_state) -> APIRouter:
     @router.post("/workspaces")
     async def create_workspace(request: Request) -> JSONResponse:
         import os
+
         body = await request.json()
         name = body.get("name", "").strip()
         dirs = body.get("document_dirs", [])
@@ -594,10 +626,11 @@ def build_ui_router(app_state) -> APIRouter:
     @router.post("/export-chat")
     async def export_chat(request: Request) -> JSONResponse:
         import os
+
         body = await request.json()
-        folder   = body.get("folder", "").strip()
+        folder = body.get("folder", "").strip()
         filename = body.get("filename", "chat.md").strip()
-        content  = body.get("content", "")
+        content = body.get("content", "")
 
         if not folder or not os.path.isdir(folder):
             raise HTTPException(400, detail=f"Invalid folder: {folder!r}")
@@ -612,6 +645,7 @@ def build_ui_router(app_state) -> APIRouter:
         # Open the file with the OS default app (Notepad / TextEdit / gedit)
         import subprocess
         import sys
+
         try:
             if sys.platform == "win32":
                 os.startfile(filepath)
@@ -633,6 +667,7 @@ def build_ui_router(app_state) -> APIRouter:
         import logging as _logging
 
         import httpx
+
         # httpx logs every outbound request at INFO; suppress for the health poll
         _httpx_log = _logging.getLogger("httpx")
         _prev_level = _httpx_log.level
@@ -663,6 +698,7 @@ def build_ui_router(app_state) -> APIRouter:
 # ---------------------------------------------------------------------------
 # Streaming agent runner
 # ---------------------------------------------------------------------------
+
 
 async def _run_agent_streaming(
     app_state,
@@ -700,35 +736,55 @@ async def _run_agent_streaming(
                     q.put(("thinking", {"text": event["text"]}))
 
                 elif etype == "tool_start":
-                    q.put(("tool_start", {
-                        "tool":    event["tool"],
-                        "input":   event["input"],
-                        "call_id": event["call_id"],
-                    }))
+                    q.put(
+                        (
+                            "tool_start",
+                            {
+                                "tool": event["tool"],
+                                "input": event["input"],
+                                "call_id": event["call_id"],
+                            },
+                        )
+                    )
 
                 elif etype == "tool_end":
-                    q.put(("tool_end", {
-                        "tool":        event["tool"],
-                        "output":      event["output"],
-                        "duration_ms": event["duration_ms"],
-                        "call_id":     event["call_id"],
-                    }))
+                    q.put(
+                        (
+                            "tool_end",
+                            {
+                                "tool": event["tool"],
+                                "output": event["output"],
+                                "duration_ms": event["duration_ms"],
+                                "call_id": event["call_id"],
+                            },
+                        )
+                    )
 
                 elif etype == "token_update":
-                    q.put(("token_update", {
-                        "token_query": event["token_input"],
-                        "token_reply": event["token_output"],
-                    }))
+                    q.put(
+                        (
+                            "token_update",
+                            {
+                                "token_query": event["token_input"],
+                                "token_reply": event["token_output"],
+                            },
+                        )
+                    )
 
                 elif etype == "text":
                     q.put(("text_chunk", {"text": event["text"]}))
 
                 elif etype == "done":
-                    q.put(("done", {
-                        "token_query":     event["token_input"],
-                        "token_reply":     event["token_output"],
-                        "iterations_used": event["iterations_used"],
-                    }))
+                    q.put(
+                        (
+                            "done",
+                            {
+                                "token_query": event["token_input"],
+                                "token_reply": event["token_output"],
+                                "iterations_used": event["iterations_used"],
+                            },
+                        )
+                    )
 
         except Exception as e:
             logger.exception("Agent thread error: %s", e)
@@ -749,9 +805,7 @@ async def _run_agent_streaming(
             break
 
         try:
-            event_type, data = await loop.run_in_executor(
-                None, lambda: q.get(timeout=0.1)
-            )
+            event_type, data = await loop.run_in_executor(None, lambda: q.get(timeout=0.1))
         except Exception:
             continue
 
@@ -768,13 +822,15 @@ async def _run_agent_streaming(
 
         elif event_type == "tool_start":
             yield _sse_event("tool_start", data)
-            assembled_tool_calls.append({
-                "tool": data["tool"],
-                "input": data["input"],
-                "call_id": data["call_id"],
-                "output": None,
-                "duration_ms": None,
-            })
+            assembled_tool_calls.append(
+                {
+                    "tool": data["tool"],
+                    "input": data["input"],
+                    "call_id": data["call_id"],
+                    "output": None,
+                    "duration_ms": None,
+                }
+            )
 
         elif event_type == "tool_end":
             yield _sse_event("tool_end", data)
@@ -802,12 +858,15 @@ async def _run_agent_streaming(
                 token_query=data.get("token_query", 0),
                 token_reply=data.get("token_reply", 0),
             )
-            yield _sse_event("done", {
-                "token_query": data.get("token_query", 0),
-                "token_reply": data.get("token_reply", 0),
-                "message_id": msg["message_id"],
-                "iterations_used": data.get("iterations_used", 0),
-            })
+            yield _sse_event(
+                "done",
+                {
+                    "token_query": data.get("token_query", 0),
+                    "token_reply": data.get("token_reply", 0),
+                    "message_id": msg["message_id"],
+                    "iterations_used": data.get("iterations_used", 0),
+                },
+            )
 
 
 def _sse_event(event_type: str, data: dict) -> str:
@@ -817,6 +876,7 @@ def _sse_event(event_type: str, data: dict) -> str:
 # ---------------------------------------------------------------------------
 # Background ingest helper (called from thread pool)
 # ---------------------------------------------------------------------------
+
 
 def _run_ingest(app_state, workspace: str, force: bool = False) -> None:
     """Run ingestion synchronously in a background thread, reporting live progress."""
@@ -829,15 +889,17 @@ def _run_ingest(app_state, workspace: str, force: bool = False) -> None:
         with _ingest_lock:
             # indexed/skipped/failed from pipeline are FILE counts, not chunk counts.
             # chunks_indexed is updated separately via _flush_batch stats.
-            progress.files_total     = total
+            progress.files_total = total
             progress.files_processed = indexed + skipped + failed
-            progress.files_skipped   = skipped
-            progress.files_failed    = failed
+            progress.files_skipped = skipped
+            progress.files_failed = failed
             # 'indexed' from callback = files successfully parsed (not chunks).
             # We derive chunks_indexed from the final stats at __done__.
-            progress.current_file = os.path.basename(current_file) if current_file not in ("", "__done__") else ""
+            progress.current_file = (
+                os.path.basename(current_file) if current_file not in ("", "__done__") else ""
+            )
             if current_file == "__done__":
-                progress.status      = "done"
+                progress.status = "done"
                 progress.finished_at = time.monotonic()
 
     try:
@@ -847,7 +909,7 @@ def _run_ingest(app_state, workspace: str, force: bool = False) -> None:
             logger.error("Ingest: workspace %r not found", workspace)
             with _ingest_lock:
                 progress.status = "error"
-                progress.error  = f"Workspace {workspace!r} not found"
+                progress.error = f"Workspace {workspace!r} not found"
             return
 
         from local_search_agent.core.config import SearchAgentConfig
@@ -881,6 +943,6 @@ def _run_ingest(app_state, workspace: str, force: bool = False) -> None:
     except Exception as e:
         logger.exception("Manual ingest failed for %r: %s", workspace, e)
         with _ingest_lock:
-            progress.status      = "error"
-            progress.error       = str(e)
+            progress.status = "error"
+            progress.error = str(e)
             progress.finished_at = time.monotonic()

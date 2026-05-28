@@ -44,6 +44,7 @@ from local_search_agent.ingestion.parsers import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _write(tmp_path: Path, name: str, content: str, encoding: str = "utf-8") -> Path:
     f = tmp_path / name
     f.write_text(content, encoding=encoding)
@@ -73,6 +74,7 @@ def _parse(path: Path):
 # ---------------------------------------------------------------------------
 # TextParser
 # ---------------------------------------------------------------------------
+
 
 class TestTextParser:
     def test_txt_basic(self, tmp_path):
@@ -131,10 +133,12 @@ class TestTextParser:
 # CSVParser
 # ---------------------------------------------------------------------------
 
+
 class TestCSVParser:
     def test_csv_basic_content(self, tmp_path):
-        f = _write(tmp_path, "data.csv",
-                   "Name,Department,Salary\nAlice,Engineering,95000\nBob,HR,72000\n")
+        f = _write(
+            tmp_path, "data.csv", "Name,Department,Salary\nAlice,Engineering,95000\nBob,HR,72000\n"
+        )
         text, ft = _parse(f)
         assert "Alice" in text
         assert "Engineering" in text
@@ -147,8 +151,7 @@ class TestCSVParser:
         assert "|" in text
 
     def test_csv_header_row_present(self, tmp_path):
-        f = _write(tmp_path, "header.csv",
-                   "Name,Department\nAlice,Engineering\n")
+        f = _write(tmp_path, "header.csv", "Name,Department\nAlice,Engineering\n")
         text, ft = _parse(f)
         assert "Name" in text
         assert "Department" in text
@@ -164,8 +167,9 @@ class TestCSVParser:
         assert "Alice" in text
 
     def test_csv_quoted_fields_with_commas(self, tmp_path):
-        f = _write(tmp_path, "quoted.csv",
-                   'Name,Bio\nAlice,"Engineer, Senior"\nBob,"Manager, HR"\n')
+        f = _write(
+            tmp_path, "quoted.csv", 'Name,Bio\nAlice,"Engineer, Senior"\nBob,"Manager, HR"\n'
+        )
         text, ft = _parse(f)
         assert "Engineer" in text
 
@@ -180,6 +184,7 @@ class TestCSVParser:
 # ---------------------------------------------------------------------------
 # JSONParser
 # ---------------------------------------------------------------------------
+
 
 class TestJSONParser:
     def test_json_dict(self, tmp_path):
@@ -246,6 +251,7 @@ class TestJSONParser:
 # XMLParser
 # ---------------------------------------------------------------------------
 
+
 class TestXMLParser:
     def test_xml_basic(self, tmp_path):
         content = (
@@ -258,11 +264,7 @@ class TestXMLParser:
         assert ft == "xml"
 
     def test_xml_nested_elements(self, tmp_path):
-        content = (
-            "<employees>"
-            "<employee><name>Alice</name><dept>HR</dept></employee>"
-            "</employees>"
-        )
+        content = "<employees><employee><name>Alice</name><dept>HR</dept></employee></employees>"
         f = _write(tmp_path, "nested.xml", content)
         text, ft = _parse(f)
         assert "Alice" in text
@@ -288,11 +290,7 @@ class TestXMLParser:
         assert len(text.strip()) > 0
 
     def test_xml_namespace_stripped(self, tmp_path):
-        content = (
-            '<root xmlns:ns="http://example.com">'
-            "<ns:title>Namespaced Title</ns:title>"
-            "</root>"
-        )
+        content = '<root xmlns:ns="http://example.com"><ns:title>Namespaced Title</ns:title></root>'
         f = _write(tmp_path, "ns.xml", content)
         text, ft = _parse(f)
         assert "Namespaced Title" in text
@@ -304,9 +302,9 @@ class TestXMLParser:
 # EMLParser
 # ---------------------------------------------------------------------------
 
+
 class TestEMLParser:
-    def _make_eml(self, tmp_path: Path, subject: str, body: str,
-                  name: str = "email.eml") -> Path:
+    def _make_eml(self, tmp_path: Path, subject: str, body: str, name: str = "email.eml") -> Path:
         content = (
             f"From: alice@example.com\r\n"
             f"To: bob@example.com\r\n"

@@ -26,6 +26,7 @@ import pytest
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _patch_keys_path(tmp_path):
     keys_file = tmp_path / "keys.json"
     return patch(
@@ -36,6 +37,7 @@ def _patch_keys_path(tmp_path):
 
 def _make_config(tmp_path, **kwargs):
     from local_search_agent.core.config import SearchAgentConfig
+
     defaults = dict(
         document_dirs=[str(tmp_path)],
         workspace_name="test_ws",
@@ -50,14 +52,17 @@ def _make_config(tmp_path, **kwargs):
 # Defaults
 # ---------------------------------------------------------------------------
 
+
 class TestDefaults:
     def test_default_workspace_name(self, tmp_path):
         from local_search_agent.core.config import SearchAgentConfig
+
         cfg = SearchAgentConfig(document_dirs=[str(tmp_path)], provider="ollama")
         assert cfg.workspace_name == "default"
 
     def test_default_provider(self, tmp_path):
         from local_search_agent.core.config import SearchAgentConfig
+
         cfg = SearchAgentConfig(document_dirs=[str(tmp_path)])
         assert cfg.provider == "google"
 
@@ -86,9 +91,11 @@ class TestDefaults:
 # document_dirs coercion
 # ---------------------------------------------------------------------------
 
+
 class TestDocumentDirsCoercion:
     def test_single_string_coerced_to_list(self, tmp_path):
         from local_search_agent.core.config import SearchAgentConfig
+
         cfg = SearchAgentConfig(
             document_dirs=str(tmp_path),
             provider="ollama",
@@ -101,6 +108,7 @@ class TestDocumentDirsCoercion:
 # API key resolution in __post_init__
 # ---------------------------------------------------------------------------
 
+
 class TestApiKeyResolution:
     def test_explicit_api_key_used_directly(self, tmp_path):
         with _patch_keys_path(tmp_path):
@@ -110,6 +118,7 @@ class TestApiKeyResolution:
     def test_saved_key_loaded_when_no_explicit_key(self, tmp_path):
         with _patch_keys_path(tmp_path):
             from local_search_agent.core.key_manager import set_key
+
             set_key("google", "saved_key_value")
             cfg = _make_config(tmp_path, provider="google")
             assert cfg.api_key == "saved_key_value"
@@ -129,6 +138,7 @@ class TestApiKeyResolution:
 # ---------------------------------------------------------------------------
 # validate()
 # ---------------------------------------------------------------------------
+
 
 class TestValidate:
     def test_valid_ollama_config_passes(self, tmp_path):
@@ -162,6 +172,7 @@ class TestValidate:
     def test_missing_api_key_logs_warning_not_raises(self, tmp_path, caplog):
         with _patch_keys_path(tmp_path):
             import logging
+
             cfg = _make_config(tmp_path, provider="google", api_key=None)
             # Ensure no Google key in env either
             env = {k: v for k, v in os.environ.items() if "GOOGLE" not in k}
@@ -175,9 +186,11 @@ class TestValidate:
 # Serialisation
 # ---------------------------------------------------------------------------
 
+
 class TestSerialisation:
     def test_to_dict_from_dict_round_trip(self, tmp_path):
         from local_search_agent.core.config import SearchAgentConfig
+
         cfg = _make_config(tmp_path, workspace_name="finance", top_k=10)
         d = cfg.to_dict()
         restored = SearchAgentConfig.from_dict(d)
@@ -200,6 +213,7 @@ class TestSerialisation:
 # ---------------------------------------------------------------------------
 # URL properties
 # ---------------------------------------------------------------------------
+
 
 class TestUrlProperties:
     def test_server_base_url(self, tmp_path):

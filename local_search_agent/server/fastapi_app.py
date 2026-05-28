@@ -54,6 +54,7 @@ def build_app(
 
     if config.enable_access_control:
         from local_search_agent.server.middleware.access_control import AccessControlMiddleware
+
         app.add_middleware(
             AccessControlMiddleware,
             config=config,
@@ -77,6 +78,7 @@ def build_app(
                 status_code=503,
             )
         from local_search_agent.scheduler.monitor import IndexMonitor
+
         monitor = IndexMonitor(metadata_db)
         return JSONResponse(monitor.get_health_summary().to_dict())
 
@@ -140,24 +142,36 @@ def _generate_docs_index(docs_dir: Path) -> None:
     from local_search_agent.core.constants import __version__
 
     groups = [
-        ("Introduction", [
-            "architecture.md",
-            "getting-started.md",
-            "installation.md",
-            "configuration.md",
-        ]),
-        ("Core Concepts", [
-            "ingestion.md",
-            "semantic-search.md",
-            "multi-workspace.md",
-        ]),
-        ("Reference", [
-            "cli-reference.md",
-            "api-reference.md",
-        ]),
-        ("Help", [
-            "troubleshooting.md",
-        ]),
+        (
+            "Introduction",
+            [
+                "architecture.md",
+                "getting-started.md",
+                "installation.md",
+                "configuration.md",
+            ],
+        ),
+        (
+            "Core Concepts",
+            [
+                "ingestion.md",
+                "semantic-search.md",
+                "multi-workspace.md",
+            ],
+        ),
+        (
+            "Reference",
+            [
+                "cli-reference.md",
+                "api-reference.md",
+            ],
+        ),
+        (
+            "Help",
+            [
+                "troubleshooting.md",
+            ],
+        ),
     ]
 
     def _clean_name(stem: str):
@@ -173,9 +187,7 @@ def _generate_docs_index(docs_dir: Path) -> None:
 
         inner = []
         for f in existing:
-            inner.append(
-                f'<li><a href="#" data-file="{f}">{_clean_name(Path(f).stem)}</a></li>'
-            )
+            inner.append(f'<li><a href="#" data-file="{f}">{_clean_name(Path(f).stem)}</a></li>')
 
         if not default_file:
             default_file = existing[0]

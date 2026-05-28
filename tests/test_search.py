@@ -16,6 +16,7 @@ from local_search_agent.search.query_builder import QueryBuilder
 # QueryBuilder tests — pure logic, no mocking
 # ---------------------------------------------------------------------------
 
+
 class TestQueryBuilder:
     def test_no_filters_returns_none(self):
         assert QueryBuilder().build() is None
@@ -66,6 +67,7 @@ class TestQueryBuilder:
 # MeilisearchClient tests — mock the SDK
 # ---------------------------------------------------------------------------
 
+
 class TestMeilisearchClient:
     """
     Tests for MeilisearchClient using a fully mocked meilisearch_python_sdk.
@@ -75,6 +77,7 @@ class TestMeilisearchClient:
     def _make_client(self, mock_sdk_client):
         """Helper: create a MeilisearchClient with pre-injected mock."""
         from local_search_agent.search.meilisearch_client import MeilisearchClient
+
         client = MeilisearchClient(
             url="http://localhost:7700",
             api_key="test_key",

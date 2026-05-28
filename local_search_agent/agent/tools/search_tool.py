@@ -18,13 +18,13 @@ logger = logging.getLogger(__name__)
 
 # Maps the human-friendly preset the LLM passes to a timedelta
 _RECENCY_DELTAS: dict[str, Optional[timedelta]] = {
-    "1d":       timedelta(days=1),
-    "3d":       timedelta(days=3),
-    "7d":       timedelta(days=7),
-    "1m":       timedelta(days=30),
-    "6m":       timedelta(days=182),
-    "1y":       timedelta(days=365),
-    "all":      None,   # no date filter
+    "1d": timedelta(days=1),
+    "3d": timedelta(days=3),
+    "7d": timedelta(days=7),
+    "1m": timedelta(days=30),
+    "6m": timedelta(days=182),
+    "1y": timedelta(days=365),
+    "all": None,  # no date filter
 }
 
 
@@ -83,6 +83,7 @@ def build_search_tool(meili_client, config):
         if config.enable_query_expansion:
             try:
                 from local_search_agent.semantic.query_expander import QueryExpander
+
                 expander = QueryExpander(llm=None)  # index-based expansion (no LLM cost)
                 effective_query = expander.expand(
                     query=query,
@@ -118,8 +119,7 @@ def build_search_tool(meili_client, config):
             )
 
         expansion_note = (
-            f"  (query expanded to: {effective_query!r})\n"
-            if effective_query != query else ""
+            f"  (query expanded to: {effective_query!r})\n" if effective_query != query else ""
         )
         lines = [f"Found {len(results)} result(s) for query: {query!r}\n{expansion_note}"]
 

@@ -49,9 +49,22 @@ _CONTENT_SELECTORS = [
 
 # Tags to unconditionally strip (noise)
 _STRIP_TAGS = {
-    "script", "style", "noscript", "nav", "header", "footer",
-    "aside", "form", "button", "input", "select", "textarea",
-    "iframe", "object", "embed", "svg",
+    "script",
+    "style",
+    "noscript",
+    "nav",
+    "header",
+    "footer",
+    "aside",
+    "form",
+    "button",
+    "input",
+    "select",
+    "textarea",
+    "iframe",
+    "object",
+    "embed",
+    "svg",
 }
 
 # Heading level map
@@ -131,7 +144,7 @@ def _element_to_markdown(element) -> str:
             classes = code_tag.get("class", [])
             for cls in classes:
                 if cls.startswith("language-"):
-                    lang = cls[len("language-"):]
+                    lang = cls[len("language-") :]
                     break
         return f"\n```{lang}\n{code_text.strip()}\n```\n"
 

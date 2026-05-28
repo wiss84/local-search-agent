@@ -132,7 +132,9 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
         if not allowed:
             logger.warning(
                 "AccessControl: user %r denied access to %r (source: %s)",
-                remote_user, doc_id, source_path,
+                remote_user,
+                doc_id,
+                source_path,
             )
             return JSONResponse(
                 {
@@ -173,7 +175,8 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
         # Fail-closed: if neither strategy could verify, deny
         logger.warning(
             "AccessControl: no working access check for user=%r path=%r. Denying (fail-closed).",
-            username, source_path,
+            username,
+            source_path,
         )
         return False
 
@@ -191,9 +194,7 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
             return None
 
         try:
-            sd = win32security.GetFileSecurity(
-                source_path, win32security.DACL_SECURITY_INFORMATION
-            )
+            sd = win32security.GetFileSecurity(source_path, win32security.DACL_SECURITY_INFORMATION)
             dacl = sd.GetSecurityDescriptorDacl()
             if dacl is None:
                 return True  # No DACL = no restriction

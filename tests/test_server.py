@@ -38,6 +38,7 @@ from local_search_agent.workspace.workspace_manager import WorkspaceManager
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def tmp_workspace(tmp_path):
     """A temp dir with two real files (txt + md)."""
@@ -96,6 +97,7 @@ def _doc_id(wm: WorkspaceManager, filename: str) -> str:
 # GET /health
 # ---------------------------------------------------------------------------
 
+
 class TestHealth:
     def test_returns_200(self, client):
         tc, *_ = client
@@ -121,6 +123,7 @@ class TestHealth:
 # GET /workspaces
 # ---------------------------------------------------------------------------
 
+
 class TestWorkspaces:
     def test_returns_200(self, client):
         tc, *_ = client
@@ -143,6 +146,7 @@ class TestWorkspaces:
 # GET /workspaces/{name}/docs
 # ---------------------------------------------------------------------------
 
+
 class TestWorkspaceDocs:
     def test_returns_200_for_known_workspace(self, client):
         tc, *_ = client
@@ -158,8 +162,9 @@ class TestWorkspaceDocs:
         docs = tc.get("/workspaces/test_ws/docs").json()["documents"]
         required_fields = {"doc_id", "title", "file_type", "source_path"}
         for doc in docs:
-            assert required_fields <= doc.keys(), \
+            assert required_fields <= doc.keys(), (
                 f"Missing fields in document: {required_fields - doc.keys()}"
+            )
 
     def test_unknown_workspace_returns_404(self, client):
         tc, *_ = client
@@ -176,6 +181,7 @@ class TestWorkspaceDocs:
 # ---------------------------------------------------------------------------
 # GET /text/{doc_id}
 # ---------------------------------------------------------------------------
+
 
 class TestTextEndpoint:
     def test_returns_200_for_known_doc(self, client):
@@ -217,6 +223,7 @@ class TestTextEndpoint:
 # ---------------------------------------------------------------------------
 # GET /docs/{doc_id}
 # ---------------------------------------------------------------------------
+
 
 class TestDocsEndpoint:
     def test_returns_200_for_known_doc(self, client):
@@ -263,6 +270,7 @@ class TestDocsEndpoint:
 # GET /workspaces/{name}/history  (MetadataDB absent → 503)
 # ---------------------------------------------------------------------------
 
+
 class TestWorkspaceHistory:
     def test_known_workspace_returns_503_without_metadata_db(self, client):
         """
@@ -291,6 +299,7 @@ class TestWorkspaceHistory:
 # ---------------------------------------------------------------------------
 # GET /help/* — static documentation endpoint
 # ---------------------------------------------------------------------------
+
 
 class TestHelpEndpoint:
     def test_nonexistent_file_returns_404_not_500(self, client):

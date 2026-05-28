@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class StructuralMetadata:
     """Structural metadata extracted from a document's Markdown AST."""
+
     sections: list[str] = field(default_factory=list)
     """Heading text lines, flattened (e.g. ["Executive Summary", "Financial Overview"])"""
 
@@ -57,10 +58,12 @@ class StructuralMetadata:
 # Regex patterns
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
 _DEFINITION_RE = re.compile(
-    r"^(?:\*\*(.+?)\*\*|__(.+?)__)[\s:–\-]+(.+)$"   # **Term**: definition
+    r"^(?:\*\*(.+?)\*\*|__(.+?)__)[\s:–\-]+(.+)$"  # **Term**: definition
 )
 _INLINE_DEF_RE = re.compile(r"^([A-Z][A-Za-z\s]{2,30}):\s+(.{10,})$")  # Term: definition
-_SEE_REF_RE = re.compile(r"(?:see|refer to|reference|per)\s+[\"'\[]?([A-Z][^\"\'\].,\n]{3,60})[\"'\]]?", re.IGNORECASE)
+_SEE_REF_RE = re.compile(
+    r"(?:see|refer to|reference|per)\s+[\"'\[]?([A-Z][^\"\'\].,\n]{3,60})[\"'\]]?", re.IGNORECASE
+)
 _TABLE_ROW_RE = re.compile(r"^\|([^|]+)\|([^|]+)\|")
 
 
@@ -125,7 +128,12 @@ class StructuralParser:
                 label = t_match.group(1).strip().strip("*_")
                 value = t_match.group(2).strip().strip("*_")
                 # Skip separator rows and header rows
-                if label and value and not re.match(r"^[-:]+$", label) and label.lower() != "metric":
+                if (
+                    label
+                    and value
+                    and not re.match(r"^[-:]+$", label)
+                    and label.lower() != "metric"
+                ):
                     meta.key_values.append(f"{label}: {value}")
                 continue
 

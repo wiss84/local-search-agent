@@ -1,6 +1,7 @@
 """
 Global constants for the Local Search Agent framework.
 """
+
 # Package version
 __version__ = "0.1.0"
 
@@ -57,8 +58,18 @@ DEFAULT_TOP_K = 5
 
 # Supported file types for ingestion
 SUPPORTED_EXTENSIONS = {
-    ".pdf", ".docx", ".html", ".htm", ".xlsx", ".pptx", ".txt", ".md",
-    ".csv", ".json", ".xml", ".eml",
+    ".pdf",
+    ".docx",
+    ".html",
+    ".htm",
+    ".xlsx",
+    ".pptx",
+    ".txt",
+    ".md",
+    ".csv",
+    ".json",
+    ".xml",
+    ".eml",
 }
 
 # Text endpoint prefix

@@ -11,6 +11,13 @@ from local_search_agent.ingestion.parsers.xlsx_parser import XLSXParser
 from local_search_agent.ingestion.parsers.xml_parser import XMLParser
 
 __all__ = [
-    "PDFParser", "DOCXParser", "HTMLParser", "XLSXParser", "TextParser",
-    "CSVParser", "JSONParser", "XMLParser", "EMLParser",
+    "PDFParser",
+    "DOCXParser",
+    "HTMLParser",
+    "XLSXParser",
+    "TextParser",
+    "CSVParser",
+    "JSONParser",
+    "XMLParser",
+    "EMLParser",
 ]

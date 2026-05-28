@@ -39,9 +39,10 @@ _DEFAULT_BATCH_SIZE = 100
 @dataclass
 class IngestStats:
     """Summary statistics returned after a pipeline run."""
+
     total: int = 0
-    indexed: int = 0       # total chunks indexed into Meilisearch
-    files_indexed: int = 0 # source files successfully parsed and indexed
+    indexed: int = 0  # total chunks indexed into Meilisearch
+    files_indexed: int = 0  # source files successfully parsed and indexed
     skipped: int = 0
     failed: int = 0
     duration_s: float = 0.0
@@ -57,8 +58,15 @@ class IngestStats:
 
 def _build_default_parsers() -> list[BaseParser]:
     return [
-        PDFParser(), DOCXParser(), HTMLParser(), XLSXParser(), TextParser(),
-        CSVParser(), JSONParser(), XMLParser(), EMLParser(),
+        PDFParser(),
+        DOCXParser(),
+        HTMLParser(),
+        XLSXParser(),
+        TextParser(),
+        CSVParser(),
+        JSONParser(),
+        XMLParser(),
+        EMLParser(),
     ]
 
 
@@ -89,7 +97,7 @@ class IngestionPipeline:
         self._meili = meili_client
         self._parsers = parsers or _build_default_parsers()
         self._batch_size = batch_size
-        self._enricher = None       # Lazy init (Phase 5)
+        self._enricher = None  # Lazy init (Phase 5)
 
     # ------------------------------------------------------------------
     # Public API
@@ -126,7 +134,9 @@ class IngestionPipeline:
                 if not self._wm.document_needs_reindex(file_path, mtime):
                     stats.skipped += 1
                     if progress_callback:
-                        progress_callback(stats.indexed, stats.skipped, stats.failed, stats.total, file_path)
+                        progress_callback(
+                            stats.indexed, stats.skipped, stats.failed, stats.total, file_path
+                        )
                     continue
 
             nodes = self._parse_file(file_path, stats)
@@ -135,14 +145,18 @@ class IngestionPipeline:
                 stats.files_indexed += 1
 
             if progress_callback:
-                progress_callback(stats.files_indexed, stats.skipped, stats.failed, stats.total, file_path)
+                progress_callback(
+                    stats.files_indexed, stats.skipped, stats.failed, stats.total, file_path
+                )
 
             if len(batch) >= self._batch_size:
                 self._enrich_batch(batch)
                 self._flush_batch(batch, stats)
                 batch.clear()
                 if progress_callback:
-                    progress_callback(stats.files_indexed, stats.skipped, stats.failed, stats.total, file_path)
+                    progress_callback(
+                        stats.files_indexed, stats.skipped, stats.failed, stats.total, file_path
+                    )
 
         if batch:
             self._enrich_batch(batch)
@@ -152,7 +166,9 @@ class IngestionPipeline:
         logger.info("Ingestion complete: %s", stats)
 
         if progress_callback:
-            progress_callback(stats.files_indexed, stats.skipped, stats.failed, stats.total, "__done__")
+            progress_callback(
+                stats.files_indexed, stats.skipped, stats.failed, stats.total, "__done__"
+            )
 
         return stats
 
@@ -168,6 +184,7 @@ class IngestionPipeline:
             try:
                 from local_search_agent.agent.provider_factory import build_llm
                 from local_search_agent.semantic.enricher import SemanticEnricher
+
                 llm = build_llm(self._config)
                 self._enricher = SemanticEnricher(
                     llm=llm,
@@ -175,12 +192,11 @@ class IngestionPipeline:
                     enable_link_graph=self._config.enable_link_graph,
                     db_path=self._config.db_path if self._config.enable_link_graph else None,
                 )
-                logger.info("SemanticEnricher initialised (link_graph=%s).",
-                            self._config.enable_link_graph)
-            except Exception as e:
-                logger.warning(
-                    "SemanticEnricher init failed: %s. Indexing without semantics.", e
+                logger.info(
+                    "SemanticEnricher initialised (link_graph=%s).", self._config.enable_link_graph
                 )
+            except Exception as e:
+                logger.warning("SemanticEnricher init failed: %s. Indexing without semantics.", e)
         return self._enricher
 
     def _enrich_batch(self, batch: list[DocumentNode]) -> None:

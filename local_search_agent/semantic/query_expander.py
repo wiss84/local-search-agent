@@ -135,7 +135,8 @@ class QueryExpander:
 
             if isinstance(terms, list):
                 extra = " ".join(
-                    str(t).strip() for t in terms
+                    str(t).strip()
+                    for t in terms
                     if t and str(t).strip().lower() not in query.lower()
                 )
                 expanded = f"{query} {extra}".strip()
@@ -185,9 +186,10 @@ class QueryExpander:
         # Filter: only add terms not already in the query
         query_lower = query.lower()
         new_terms = [
-            s for s in dict.fromkeys(all_synonyms)   # deduplicate
+            s
+            for s in dict.fromkeys(all_synonyms)  # deduplicate
             if s.lower() not in query_lower and len(s) > 2
-        ][:8]   # cap additions
+        ][:8]  # cap additions
 
         if not new_terms:
             return query

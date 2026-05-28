@@ -19,6 +19,7 @@ from local_search_agent.workspace.workspace_manager import WorkspaceManager
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def wm(tmp_path):
     """Fresh WorkspaceManager backed by a temp SQLite file."""
@@ -36,6 +37,7 @@ def sample_node(tmp_path):
 # ---------------------------------------------------------------------------
 # Workspace CRUD
 # ---------------------------------------------------------------------------
+
 
 class TestWorkspaceCRUD:
     def test_create_and_list(self, wm):
@@ -73,6 +75,7 @@ class TestWorkspaceCRUD:
 # ---------------------------------------------------------------------------
 # Document CRUD
 # ---------------------------------------------------------------------------
+
 
 class TestDocumentCRUD:
     def test_register_and_get_from_cache(self, wm, sample_node):
@@ -112,6 +115,7 @@ class TestDocumentCRUD:
 # ---------------------------------------------------------------------------
 # Delta logic
 # ---------------------------------------------------------------------------
+
 
 class TestDeltaLogic:
     def test_unindexed_file_needs_reindex(self, wm, sample_node):

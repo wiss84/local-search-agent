@@ -97,8 +97,9 @@ class LocalSearchAgent:
         )
 
         def call_llm(state: AgentState) -> dict:
-            logger.debug("call_llm: %d messages, iteration %d",
-                         len(state["messages"]), state["iterations"])
+            logger.debug(
+                "call_llm: %d messages, iteration %d", len(state["messages"]), state["iterations"]
+            )
             response = rate_limiter.call_with_retry(
                 llm_with_tools.invoke,
                 state["messages"],
@@ -167,10 +168,12 @@ class LocalSearchAgent:
         """Ask the agent a question and return a structured response."""
         effective_workspace = workspace or self._config.workspace_name
 
-        system_msg = SystemMessage(content=build_system_prompt(
-            workspace_name=effective_workspace,
-            document_dirs=self._config.document_dirs,
-        ))
+        system_msg = SystemMessage(
+            content=build_system_prompt(
+                workspace_name=effective_workspace,
+                document_dirs=self._config.document_dirs,
+            )
+        )
 
         initial_state: AgentState = {
             "messages": [system_msg, HumanMessage(content=question)],
@@ -210,10 +213,12 @@ class LocalSearchAgent:
         import uuid as _uuid
 
         effective_workspace = workspace or self._config.workspace_name
-        system_msg = SystemMessage(content=build_system_prompt(
-            workspace_name=effective_workspace,
-            document_dirs=self._config.document_dirs,
-        ))
+        system_msg = SystemMessage(
+            content=build_system_prompt(
+                workspace_name=effective_workspace,
+                document_dirs=self._config.document_dirs,
+            )
+        )
         initial_state: AgentState = {
             "messages": [system_msg, HumanMessage(content=question)],
             "iterations": 0,
@@ -260,9 +265,13 @@ class LocalSearchAgent:
                         # Accumulate token usage
                         usage = getattr(msg, "usage_metadata", None)
                         if usage and isinstance(usage, dict):
-                            token_input  += usage.get("input_tokens",  0) or 0
+                            token_input += usage.get("input_tokens", 0) or 0
                             token_output += usage.get("output_tokens", 0) or 0
-                            yield {"type": "token_update", "token_input": token_input, "token_output": token_output}
+                            yield {
+                                "type": "token_update",
+                                "token_input": token_input,
+                                "token_output": token_output,
+                            }
 
                         # Extract thinking and text from content blocks
                         thinking_text = ""
@@ -275,7 +284,7 @@ class LocalSearchAgent:
                             yield {"type": "thinking", "text": thinking_text}
 
                         # Emit tool_start for every tool call in this LLM step
-                        for tc in (msg.tool_calls or []):
+                        for tc in msg.tool_calls or []:
                             call_id = tc.get("id") or _uuid.uuid4().hex[:8]
                             _tool_start_times[call_id] = _time.monotonic()
                             _tool_names[call_id] = tc["name"]
@@ -313,17 +322,17 @@ class LocalSearchAgent:
 
         # Fall back to char-based estimate when provider didn't return token counts
         if token_input == 0 and token_output == 0:
-            token_input  = response.get("token_input",  0)
+            token_input = response.get("token_input", 0)
             token_output = response.get("token_output", 0)
 
         yield {"type": "text", "text": response["answer"]}
         yield {
             "type": "done",
-            "token_input":     token_input,
-            "token_output":    token_output,
+            "token_input": token_input,
+            "token_output": token_output,
             "iterations_used": response.get("iterations_used", 0),
-            "truncated":       response.get("truncated", False),
-            "sources":         response.get("sources", []),
+            "truncated": response.get("truncated", False),
+            "sources": response.get("sources", []),
         }
 
     def _build_response(self, state: AgentState, question: str) -> dict:
@@ -343,7 +352,8 @@ class LocalSearchAgent:
         if truncated:
             answer = (
                 MAX_ITERATIONS_NOTICE.format(max_iterations=self._config.max_iterations)
-                + "\n\n" + answer
+                + "\n\n"
+                + answer
             )
 
         sources = self._extract_sources(state)
@@ -355,16 +365,26 @@ class LocalSearchAgent:
             if isinstance(msg, AIMessage):
                 usage = getattr(msg, "usage_metadata", None)
                 if usage and isinstance(usage, dict):
-                    token_input  += usage.get("input_tokens",  0) or 0
+                    token_input += usage.get("input_tokens", 0) or 0
                     token_output += usage.get("output_tokens", 0) or 0
         # Fallback: rough character-based estimate when provider doesn't return usage
         if token_input == 0 and token_output == 0:
-            total_input_chars  = sum(len(getattr(m, "content", "") or "") for m in state["messages"] if not isinstance(m, AIMessage))
-            token_input  = max(1, total_input_chars  // 4)
+            total_input_chars = sum(
+                len(getattr(m, "content", "") or "")
+                for m in state["messages"]
+                if not isinstance(m, AIMessage)
+            )
+            token_input = max(1, total_input_chars // 4)
             token_output = max(1, len(answer) // 4)
 
-        logger.info("Query complete: iterations=%d, truncated=%s, sources=%d, tokens=%d+%d",
-                    iterations_used, truncated, len(sources), token_input, token_output)
+        logger.info(
+            "Query complete: iterations=%d, truncated=%s, sources=%d, tokens=%d+%d",
+            iterations_used,
+            truncated,
+            len(sources),
+            token_input,
+            token_output,
+        )
 
         return {
             "answer": answer,
@@ -399,7 +419,7 @@ class LocalSearchAgent:
         if isinstance(content, str):
             return content, ""
         if isinstance(content, list):
-            text_parts     = []
+            text_parts = []
             thinking_parts = []
             for block in content:
                 if isinstance(block, dict):

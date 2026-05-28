@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _patch_settings_path(tmp_path):
     settings_file = tmp_path / "settings.json"
     return patch(
@@ -65,9 +66,14 @@ def _make_framework(tmp_path):
 # get_semantic_settings
 # ---------------------------------------------------------------------------
 
+
 class TestGetSemanticSettings:
     def test_returns_dict_with_all_three_keys(self, tmp_path):
-        with _patch_settings_path(tmp_path), _patch_keys_path(tmp_path), _patch_models_path(tmp_path):
+        with (
+            _patch_settings_path(tmp_path),
+            _patch_keys_path(tmp_path),
+            _patch_models_path(tmp_path),
+        ):
             fw = _make_framework(tmp_path)
             result = fw.get_semantic_settings()
             assert "enable_semantic" in result
@@ -75,7 +81,11 @@ class TestGetSemanticSettings:
             assert "enable_link_graph" in result
 
     def test_defaults_all_false(self, tmp_path):
-        with _patch_settings_path(tmp_path), _patch_keys_path(tmp_path), _patch_models_path(tmp_path):
+        with (
+            _patch_settings_path(tmp_path),
+            _patch_keys_path(tmp_path),
+            _patch_models_path(tmp_path),
+        ):
             fw = _make_framework(tmp_path)
             result = fw.get_semantic_settings()
             assert result["enable_semantic"] is False
@@ -83,7 +93,11 @@ class TestGetSemanticSettings:
             assert result["enable_link_graph"] is False
 
     def test_reflects_config_values(self, tmp_path):
-        with _patch_settings_path(tmp_path), _patch_keys_path(tmp_path), _patch_models_path(tmp_path):
+        with (
+            _patch_settings_path(tmp_path),
+            _patch_keys_path(tmp_path),
+            _patch_models_path(tmp_path),
+        ):
             fw = _make_framework(tmp_path)
             fw.config.enable_semantic = True
             fw.config.enable_query_expansion = True
@@ -97,9 +111,14 @@ class TestGetSemanticSettings:
 # set_semantic_settings
 # ---------------------------------------------------------------------------
 
+
 class TestSetSemanticSettings:
     def test_updates_config_in_memory(self, tmp_path):
-        with _patch_settings_path(tmp_path), _patch_keys_path(tmp_path), _patch_models_path(tmp_path):
+        with (
+            _patch_settings_path(tmp_path),
+            _patch_keys_path(tmp_path),
+            _patch_models_path(tmp_path),
+        ):
             fw = _make_framework(tmp_path)
             fw.set_semantic_settings(
                 enable_semantic=True,
@@ -111,7 +130,11 @@ class TestSetSemanticSettings:
             assert fw.config.enable_link_graph is False
 
     def test_persists_to_settings_json(self, tmp_path):
-        with _patch_settings_path(tmp_path), _patch_keys_path(tmp_path), _patch_models_path(tmp_path):
+        with (
+            _patch_settings_path(tmp_path),
+            _patch_keys_path(tmp_path),
+            _patch_models_path(tmp_path),
+        ):
             fw = _make_framework(tmp_path)
             fw.set_semantic_settings(
                 enable_semantic=True,
@@ -119,13 +142,18 @@ class TestSetSemanticSettings:
                 enable_link_graph=True,
             )
             from local_search_agent.core.key_manager import get_semantic_settings
+
             saved = get_semantic_settings()
             assert saved["enable_semantic"] is True
             assert saved["enable_query_expansion"] is False
             assert saved["enable_link_graph"] is True
 
     def test_round_trip_set_then_get(self, tmp_path):
-        with _patch_settings_path(tmp_path), _patch_keys_path(tmp_path), _patch_models_path(tmp_path):
+        with (
+            _patch_settings_path(tmp_path),
+            _patch_keys_path(tmp_path),
+            _patch_models_path(tmp_path),
+        ):
             fw = _make_framework(tmp_path)
             fw.set_semantic_settings(
                 enable_semantic=True,
@@ -140,7 +168,11 @@ class TestSetSemanticSettings:
             }
 
     def test_rebuilds_agent_when_link_graph_enabled(self, tmp_path):
-        with _patch_settings_path(tmp_path), _patch_keys_path(tmp_path), _patch_models_path(tmp_path):
+        with (
+            _patch_settings_path(tmp_path),
+            _patch_keys_path(tmp_path),
+            _patch_models_path(tmp_path),
+        ):
             fw = _make_framework(tmp_path)
             fw.config.enable_link_graph = False
             fw._agent = MagicMock()  # simulate existing agent
@@ -152,7 +184,11 @@ class TestSetSemanticSettings:
             assert fw._agent is None  # should have been cleared
 
     def test_rebuilds_agent_when_link_graph_disabled(self, tmp_path):
-        with _patch_settings_path(tmp_path), _patch_keys_path(tmp_path), _patch_models_path(tmp_path):
+        with (
+            _patch_settings_path(tmp_path),
+            _patch_keys_path(tmp_path),
+            _patch_models_path(tmp_path),
+        ):
             fw = _make_framework(tmp_path)
             fw.config.enable_link_graph = True
             fw._agent = MagicMock()
@@ -164,13 +200,17 @@ class TestSetSemanticSettings:
             assert fw._agent is None
 
     def test_does_not_rebuild_agent_when_link_graph_unchanged(self, tmp_path):
-        with _patch_settings_path(tmp_path), _patch_keys_path(tmp_path), _patch_models_path(tmp_path):
+        with (
+            _patch_settings_path(tmp_path),
+            _patch_keys_path(tmp_path),
+            _patch_models_path(tmp_path),
+        ):
             fw = _make_framework(tmp_path)
             fw.config.enable_link_graph = False
             mock_agent = MagicMock()
             fw._agent = mock_agent
             fw.set_semantic_settings(
-                enable_semantic=True,   # changed
+                enable_semantic=True,  # changed
                 enable_query_expansion=True,  # changed
                 enable_link_graph=False,  # unchanged
             )
@@ -178,7 +218,11 @@ class TestSetSemanticSettings:
             assert fw._agent is mock_agent
 
     def test_all_false_disables_everything(self, tmp_path):
-        with _patch_settings_path(tmp_path), _patch_keys_path(tmp_path), _patch_models_path(tmp_path):
+        with (
+            _patch_settings_path(tmp_path),
+            _patch_keys_path(tmp_path),
+            _patch_models_path(tmp_path),
+        ):
             fw = _make_framework(tmp_path)
             # First enable everything
             fw.set_semantic_settings(True, True, True)
@@ -189,7 +233,11 @@ class TestSetSemanticSettings:
 
     def test_settings_survive_framework_restart(self, tmp_path):
         """Settings written to settings.json should be picked up by a new framework instance."""
-        with _patch_settings_path(tmp_path), _patch_keys_path(tmp_path), _patch_models_path(tmp_path):
+        with (
+            _patch_settings_path(tmp_path),
+            _patch_keys_path(tmp_path),
+            _patch_models_path(tmp_path),
+        ):
             fw1 = _make_framework(tmp_path)
             fw1.set_semantic_settings(
                 enable_semantic=True,

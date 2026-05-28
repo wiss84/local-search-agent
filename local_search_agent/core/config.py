@@ -74,8 +74,8 @@ class SearchAgentConfig:
 
     # --- File server ---
     host: str = DEFAULT_HOST
-    port: int = DEFAULT_PORT          # Dashboard / file-server API endpoint
-    file_server_port: int = 8000     # Separate, fixed port for the text/docs file server
+    port: int = DEFAULT_PORT  # Dashboard / file-server API endpoint
+    file_server_port: int = 8000  # Separate, fixed port for the text/docs file server
 
     # --- Agent behaviour ---
     top_k: int = DEFAULT_TOP_K
@@ -104,6 +104,7 @@ class SearchAgentConfig:
             self.document_dirs = [self.document_dirs]
         if self.api_key is None:
             from local_search_agent.core.key_manager import resolve_key
+
             self.api_key = resolve_key(self.provider)
         if self.index_name is None:
             self.index_name = self.workspace_name
@@ -111,10 +112,11 @@ class SearchAgentConfig:
         # (explicit means the caller passed a non-default value)
         if not any([self.enable_semantic, self.enable_query_expansion, self.enable_link_graph]):
             from local_search_agent.core.key_manager import get_semantic_settings
+
             s = get_semantic_settings()
-            self.enable_semantic        = s["enable_semantic"]
+            self.enable_semantic = s["enable_semantic"]
             self.enable_query_expansion = s["enable_query_expansion"]
-            self.enable_link_graph      = s["enable_link_graph"]
+            self.enable_link_graph = s["enable_link_graph"]
 
     # ------------------------------------------------------------------
     # Accessors
@@ -152,10 +154,12 @@ class SearchAgentConfig:
             raise ValueError(f"Unknown provider: {self.provider!r}.")
         if self.provider != "ollama" and not self.api_key:
             import logging as _logging
+
             _logging.getLogger(__name__).warning(
                 "No API key found for provider %r. "
                 "Run: local-search config set-key --provider %s --key YOUR_KEY",
-                self.provider, self.provider,
+                self.provider,
+                self.provider,
             )
         for d in self.document_dirs:
             if not os.path.isdir(d):

@@ -54,6 +54,7 @@ class SearchAgentFramework:
         self._meili_manager = None
         # Activate LangSmith tracing if credentials are saved
         from local_search_agent.core.key_manager import apply_langsmith_env
+
         if apply_langsmith_env():
             logger.info("LangSmith tracing activated.")
         logger.info("SearchAgentFramework initialised (workspace=%r)", config.workspace_name)
@@ -66,6 +67,7 @@ class SearchAgentFramework:
         """Start the local Meilisearch binary if it is not already running."""
         if self._meili_manager is None:
             from local_search_agent.core.meilisearch_manager import MeilisearchManager
+
             self._meili_manager = MeilisearchManager(
                 url=self.config.meilisearch_url,
                 master_key=self.config.meili_master_key,
@@ -76,6 +78,7 @@ class SearchAgentFramework:
         self._ensure_meilisearch()
         if self._meili_client is None:
             from local_search_agent.search.meilisearch_client import MeilisearchClient
+
             self._meili_client = MeilisearchClient(
                 url=self.config.meilisearch_url,
                 api_key=self.config.meili_master_key,
@@ -86,6 +89,7 @@ class SearchAgentFramework:
     def _get_scheduler(self):
         if self._scheduler is None:
             from local_search_agent.scheduler.incremental_sync import IncrementalSyncScheduler
+
             self._scheduler = IncrementalSyncScheduler(
                 workspace_manager=self._workspace_manager,
                 metadata_db=self._metadata_db,
@@ -234,8 +238,7 @@ class SearchAgentFramework:
         ws = self._workspace_manager.get_workspace(workspace_name)
         if ws is None:
             raise ValueError(
-                f"Workspace {workspace_name!r} is not registered. "
-                "Call create_workspace() first."
+                f"Workspace {workspace_name!r} is not registered. Call create_workspace() first."
             )
 
         # Build a per-workspace config derived from the main config
@@ -244,7 +247,7 @@ class SearchAgentFramework:
             workspace_name=workspace_name,
             meilisearch_url=self.config.meilisearch_url,
             meili_master_key=self.config.meili_master_key,
-            index_name=workspace_name,    # Each workspace = its own Meilisearch index
+            index_name=workspace_name,  # Each workspace = its own Meilisearch index
             provider=self.config.provider,
             api_key=self.config.api_key,
             model_name=self.config.model_name,
@@ -337,6 +340,7 @@ class SearchAgentFramework:
             if ws["name"] != self.config.workspace_name:
                 # Build a minimal config for this workspace
                 from local_search_agent.core.config import SearchAgentConfig
+
                 ws_config = SearchAgentConfig(
                     document_dirs=[ws["document_dir"]],
                     workspace_name=ws["name"],
@@ -377,11 +381,11 @@ class SearchAgentFramework:
         ws = self._workspace_manager.get_workspace(workspace_name)
         if ws is None:
             raise ValueError(
-                f"Workspace {workspace_name!r} not found. "
-                "Call create_workspace() first."
+                f"Workspace {workspace_name!r} not found. Call create_workspace() first."
             )
 
         from local_search_agent.core.config import SearchAgentConfig
+
         ws_config = SearchAgentConfig(
             document_dirs=[ws["document_dir"]],
             workspace_name=workspace_name,
@@ -414,6 +418,7 @@ class SearchAgentFramework:
         IndexHealthSummary with per-workspace status, doc counts, and staleness info.
         """
         from local_search_agent.scheduler.monitor import IndexMonitor
+
         monitor = IndexMonitor(self._metadata_db)
         return monitor.get_health_summary()
 
@@ -464,9 +469,9 @@ class SearchAgentFramework:
 
         prev_link_graph = self.config.enable_link_graph
 
-        self.config.enable_semantic        = enable_semantic
+        self.config.enable_semantic = enable_semantic
         self.config.enable_query_expansion = enable_query_expansion
-        self.config.enable_link_graph      = enable_link_graph
+        self.config.enable_link_graph = enable_link_graph
 
         set_all_semantic_settings(
             enable_semantic=enable_semantic,
@@ -475,7 +480,7 @@ class SearchAgentFramework:
         )
 
         # Force agent rebuild if link_graph changed (tool list changes)
-        if prev_link_graph != enable_link_graph and hasattr(self, '_agent'):
+        if prev_link_graph != enable_link_graph and hasattr(self, "_agent"):
             self._agent = None
             logger.info(
                 "enable_link_graph changed to %s — agent will rebuild on next query.",
@@ -485,7 +490,9 @@ class SearchAgentFramework:
         logger.info(
             "Semantic settings updated: enable_semantic=%s, "
             "enable_query_expansion=%s, enable_link_graph=%s",
-            enable_semantic, enable_query_expansion, enable_link_graph,
+            enable_semantic,
+            enable_query_expansion,
+            enable_link_graph,
         )
 
     def get_semantic_settings(self) -> dict[str, bool]:
@@ -510,7 +517,7 @@ class SearchAgentFramework:
         ```
         """
         return {
-            "enable_semantic":        self.config.enable_semantic,
+            "enable_semantic": self.config.enable_semantic,
             "enable_query_expansion": self.config.enable_query_expansion,
-            "enable_link_graph":      self.config.enable_link_graph,
+            "enable_link_graph": self.config.enable_link_graph,
         }

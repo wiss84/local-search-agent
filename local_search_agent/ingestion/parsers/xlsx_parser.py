@@ -140,7 +140,9 @@ class XLSXParser(BaseParser):
             wb.close()
 
         if not sections:
-            raise ParserError(source_path, "Workbook contains no readable data in any visible sheet.")
+            raise ParserError(
+                source_path, "Workbook contains no readable data in any visible sheet."
+            )
 
         raw_text = "\n\n".join(sections)
         cleaned_text = clean(raw_text)

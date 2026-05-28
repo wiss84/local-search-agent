@@ -63,18 +63,21 @@ class SemanticEnricher:
     def _get_concept_compiler(self):
         if self._concept_compiler is None and self._llm is not None:
             from local_search_agent.semantic.concept_compiler import ConceptCompiler
+
             self._concept_compiler = ConceptCompiler(llm=self._llm)
         return self._concept_compiler
 
     def _get_structural_parser(self):
         if self._structural_parser is None:
             from local_search_agent.semantic.structural_parser import StructuralParser
+
             self._structural_parser = StructuralParser()
         return self._structural_parser
 
     def _get_link_graph(self):
         if self._link_graph is None and self._db_path:
             from local_search_agent.semantic.link_graph import LinkGraph
+
             self._link_graph = LinkGraph(db_path=self._db_path)
         return self._link_graph
 
@@ -91,15 +94,13 @@ class SemanticEnricher:
             meta = compiler.compile(node)
             # Merge: combine AI concepts with entities into node.concepts
             # Combine AI synonyms into node.synonyms
-            node.concepts = list(dict.fromkeys(
-                node.concepts + meta.concepts + meta.entities
-            ))
-            node.synonyms = list(dict.fromkeys(
-                node.synonyms + meta.synonyms
-            ))
+            node.concepts = list(dict.fromkeys(node.concepts + meta.concepts + meta.entities))
+            node.synonyms = list(dict.fromkeys(node.synonyms + meta.synonyms))
             logger.debug(
                 "ConceptCompiler enriched %r: %d concepts, %d synonyms",
-                node.title, len(node.concepts), len(node.synonyms),
+                node.title,
+                len(node.concepts),
+                len(node.synonyms),
             )
 
         # Option B: Structural Parser

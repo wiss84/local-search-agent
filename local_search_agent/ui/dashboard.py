@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # AppState — single object wiring all backend components together
 # ---------------------------------------------------------------------------
 
+
 class AppState:
     """
     Holds all backend singletons.  One instance lives for the lifetime of the
@@ -70,7 +71,7 @@ class AppState:
         self.framework.start_file_server(port=config.file_server_port)
         self.framework._ensure_meilisearch()
 
-        self.scheduler: Optional[object] = None   # set by start_scheduler()
+        self.scheduler: Optional[object] = None  # set by start_scheduler()
 
         self._agent = None
         self._agent_workspace: Optional[str] = None
@@ -107,6 +108,7 @@ class AppState:
     def _config_for_workspace(self, workspace: str):
         """Return a SearchAgentConfig scoped to a specific workspace."""
         from local_search_agent.core.config import SearchAgentConfig
+
         ws = self.workspace_manager.get_workspace(workspace)
         document_dirs = []
         if ws:
@@ -137,6 +139,7 @@ class AppState:
 
     def start_scheduler(self, interval_minutes: int = 15) -> None:
         from local_search_agent.scheduler.incremental_sync import IncrementalSyncScheduler
+
         self.scheduler = IncrementalSyncScheduler(
             workspace_manager=self.workspace_manager,
             metadata_db=self._metadata_db,
@@ -149,6 +152,7 @@ class AppState:
 # ---------------------------------------------------------------------------
 # FastAPI app builder
 # ---------------------------------------------------------------------------
+
 
 def build_dashboard_app(app_state: AppState):
     """
@@ -193,7 +197,7 @@ def build_dashboard_app(app_state: AppState):
     templates_dir = os.path.join(os.path.dirname(__file__), "templates")
     jinja_env = Environment(
         loader=FileSystemLoader(templates_dir),
-        autoescape=False,   # HTML templates — autoescape would mangle SVG/JS
+        autoescape=False,  # HTML templates — autoescape would mangle SVG/JS
     )
 
     @app.get("/")
@@ -237,8 +241,8 @@ def _start_server_thread(app, host: str, port: int) -> threading.Thread:
             app,
             host=host,
             port=port,
-            log_level="warning",   # keep console clean; dashboard has its own logs
-            access_log=False,      # suppress per-request access lines (e.g. health poll spam)
+            log_level="warning",  # keep console clean; dashboard has its own logs
+            access_log=False,  # suppress per-request access lines (e.g. health poll spam)
         )
 
     t = threading.Thread(target=_run, daemon=True)
@@ -249,6 +253,7 @@ def _start_server_thread(app, host: str, port: int) -> threading.Thread:
 # ---------------------------------------------------------------------------
 # pywebview window
 # ---------------------------------------------------------------------------
+
 
 def _open_window(url: str) -> None:
     """Open the pywebview window.  Blocks until the window is closed."""
@@ -265,7 +270,7 @@ def _open_window(url: str) -> None:
         min_size=(900, 600),
         resizable=True,
         on_top=False,
-        background_color="#0f1117",   # matches the dark theme background
+        background_color="#0f1117",  # matches the dark theme background
     )
     window.events.loaded += _on_loaded
 
@@ -278,6 +283,7 @@ def _open_window(url: str) -> None:
 # Folder dialog helper — called from JS via pywebview's JS API
 # ---------------------------------------------------------------------------
 
+
 class _JSBridge:
     """
     Exposed to the frontend as window.pywebview.api
@@ -289,6 +295,7 @@ class _JSBridge:
     def pick_folder(self) -> Optional[str]:
         """Open the native OS folder picker and return the selected path."""
         import webview
+
         try:
             dialog_type = webview.FileDialog.FOLDER
         except AttributeError:
@@ -304,15 +311,16 @@ class _JSBridge:
         """Open a URL or local file path using the OS default application."""
         import subprocess
         import sys
+
         try:
-            if sys.platform == 'win32':
+            if sys.platform == "win32":
                 # Convert http://localhost:8000/docs/<id> → actual file path if needed
                 # For web URLs just open in the default browser
-                subprocess.Popen(['cmd', '/c', 'start', '', url], shell=False)
-            elif sys.platform == 'darwin':
-                subprocess.Popen(['open', url])
+                subprocess.Popen(["cmd", "/c", "start", "", url], shell=False)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", url])
             else:
-                subprocess.Popen(['xdg-open', url])
+                subprocess.Popen(["xdg-open", url])
         except Exception as e:
             logger.warning("open_url failed for %r: %s", url, e)
 
@@ -320,6 +328,7 @@ class _JSBridge:
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def run(
     host: str = "127.0.0.1",
@@ -329,7 +338,7 @@ def run(
     model: str = "gemma-4-31b-it",
     meili_url: str = "http://localhost:7700",
     meili_key: str = "local_search_master_key",
-    scheduler_interval: int = 0,   # 0 = don't start scheduler
+    scheduler_interval: int = 0,  # 0 = don't start scheduler
     open_window: bool = True,
     file_server_port: int = 8000,
 ) -> None:
@@ -356,6 +365,7 @@ def run(
 
     # Restore persisted provider/model from ui_config if available
     from local_search_agent.ui.store import UIStore
+
     store = UIStore(db_path=db_path)
     saved_provider = store.get_config("global.provider")
     saved_model = store.get_config("global.model")
@@ -378,9 +388,7 @@ def run(
     _start_server_thread(app, host, port)
 
     if not _wait_for_server(host, port, timeout=15.0):
-        raise RuntimeError(
-            f"Dashboard server did not start within 15 s on {host}:{port}"
-        )
+        raise RuntimeError(f"Dashboard server did not start within 15 s on {host}:{port}")
     logger.info("Dashboard server ready.")
 
     url = f"http://{host}:{port}"
@@ -426,6 +434,7 @@ def _open_window_with_bridge(url: str, bridge: _JSBridge) -> None:
 # __main__ entry point
 # ---------------------------------------------------------------------------
 
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="local-search ui",
@@ -433,22 +442,38 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--host", default=os.environ.get("LSA_HOST", "127.0.0.1"))
     p.add_argument("--port", type=int, default=int(os.environ.get("LSA_PORT", "8765")))
-    p.add_argument("--db", default=os.environ.get("LSA_DB_PATH", os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),  # project root
-        "local_search_agent.db",
-    )))
-    p.add_argument("--provider", default=os.environ.get("LSA_PROVIDER", "google"),
-                   choices=["google", "ollama", "openai", "anthropic"])
+    p.add_argument(
+        "--db",
+        default=os.environ.get(
+            "LSA_DB_PATH",
+            os.path.join(
+                os.path.dirname(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                ),  # project root
+                "local_search_agent.db",
+            ),
+        ),
+    )
+    p.add_argument(
+        "--provider",
+        default=os.environ.get("LSA_PROVIDER", "google"),
+        choices=["google", "ollama", "openai", "anthropic"],
+    )
     p.add_argument("--model", default=os.environ.get("LSA_MODEL", "gemma-4-31b-it"))
     p.add_argument("--meili-url", default=os.environ.get("MEILI_URL", "http://localhost:7700"))
-    p.add_argument("--meili-key",
-                   default=os.environ.get("MEILI_MASTER_KEY", "local_search_master_key"))
-    p.add_argument("--scheduler-interval", type=int, default=0,
-                   help="Start scheduler with this interval in minutes (0 = disabled).")
-    p.add_argument("--headless", action="store_true",
-                   help="Run API server only, no window (for debugging).")
-    p.add_argument("--log-level", default="INFO",
-                   choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    p.add_argument(
+        "--meili-key", default=os.environ.get("MEILI_MASTER_KEY", "local_search_master_key")
+    )
+    p.add_argument(
+        "--scheduler-interval",
+        type=int,
+        default=0,
+        help="Start scheduler with this interval in minutes (0 = disabled).",
+    )
+    p.add_argument(
+        "--headless", action="store_true", help="Run API server only, no window (for debugging)."
+    )
+    p.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p
 
 

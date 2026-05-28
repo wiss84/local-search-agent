@@ -20,6 +20,7 @@ from local_search_agent.core.document_node import DocumentNode
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def sample_txt(tmp_path):
     """Create a real temp file so from_file() can stat it."""
@@ -37,6 +38,7 @@ def sample_txt(tmp_path):
 # ---------------------------------------------------------------------------
 # make_doc_id
 # ---------------------------------------------------------------------------
+
 
 class TestMakeDocId:
     def test_same_path_produces_same_id(self):
@@ -61,6 +63,7 @@ class TestMakeDocId:
 # from_file()
 # ---------------------------------------------------------------------------
 
+
 class TestFromFile:
     def test_basic_construction(self, sample_txt):
         node = DocumentNode.from_file(
@@ -80,7 +83,9 @@ class TestFromFile:
 
     def test_concepts_and_synonyms(self, sample_txt):
         node = DocumentNode.from_file(
-            sample_txt, "text", "ws",
+            sample_txt,
+            "text",
+            "ws",
             concepts=["finance", "cloud"],
             synonyms=["AWS", "Amazon Web Services"],
         )
@@ -100,6 +105,7 @@ class TestFromFile:
 # Serialisation round-trip
 # ---------------------------------------------------------------------------
 
+
 class TestSerialisation:
     def test_to_dict_from_dict_roundtrip(self, sample_txt):
         node = DocumentNode.from_file(sample_txt, "some text", "ws")
@@ -117,9 +123,17 @@ class TestSerialisation:
         node = DocumentNode.from_file(sample_txt, "text", "ws")
         d = node.to_dict()
         expected_keys = {
-            "doc_id", "title", "text", "file_type", "source_path",
-            "folder_path", "workspace", "modified_at", "indexed_at",
-            "concepts", "synonyms",
+            "doc_id",
+            "title",
+            "text",
+            "file_type",
+            "source_path",
+            "folder_path",
+            "workspace",
+            "modified_at",
+            "indexed_at",
+            "concepts",
+            "synonyms",
         }
         assert expected_keys == set(d.keys())
 
@@ -127,6 +141,7 @@ class TestSerialisation:
 # ---------------------------------------------------------------------------
 # snippet()
 # ---------------------------------------------------------------------------
+
 
 class TestSnippet:
     TEXT = (

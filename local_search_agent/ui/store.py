@@ -102,7 +102,7 @@ class UIStore:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")   # concurrent readers + one writer
+        conn.execute("PRAGMA journal_mode=WAL")  # concurrent readers + one writer
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
@@ -130,15 +130,19 @@ class UIStore:
                 (session_id, workspace, title, now, now),
             )
         logger.debug("Session created: %r (workspace=%r)", session_id, workspace)
-        return {"session_id": session_id, "workspace": workspace,
-                "title": title, "created_at": now, "updated_at": now}
+        return {
+            "session_id": session_id,
+            "workspace": workspace,
+            "title": title,
+            "created_at": now,
+            "updated_at": now,
+        }
 
     def list_sessions(self, workspace: str, limit: int = 50) -> list[dict]:
         """Return sessions for a workspace, newest first."""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM chat_sessions WHERE workspace = ?"
-                " ORDER BY updated_at DESC LIMIT ?",
+                "SELECT * FROM chat_sessions WHERE workspace = ? ORDER BY updated_at DESC LIMIT ?",
                 (workspace, limit),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -207,15 +211,29 @@ class UIStore:
                    (message_id, session_id, role, content, tool_calls, thinking,
                     token_query, token_reply, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (message_id, session_id, role, content, tool_calls_json,
-                 thinking, token_query, token_reply, now),
+                (
+                    message_id,
+                    session_id,
+                    role,
+                    content,
+                    tool_calls_json,
+                    thinking,
+                    token_query,
+                    token_reply,
+                    now,
+                ),
             )
             self._touch_session(session_id, conn)
         return {
-            "message_id": message_id, "session_id": session_id, "role": role,
-            "content": content, "tool_calls": tool_calls or [],
-            "thinking": thinking, "token_query": token_query,
-            "token_reply": token_reply, "created_at": now,
+            "message_id": message_id,
+            "session_id": session_id,
+            "role": role,
+            "content": content,
+            "tool_calls": tool_calls or [],
+            "thinking": thinking,
+            "token_query": token_query,
+            "token_reply": token_reply,
+            "created_at": now,
         }
 
     def list_messages(self, session_id: str) -> list[dict]:
@@ -251,9 +269,7 @@ class UIStore:
     def get_config(self, key: str, default=None):
         """Return the decoded value for a config key, or default if absent."""
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT value FROM ui_config WHERE key = ?", (key,)
-            ).fetchone()
+            row = conn.execute("SELECT value FROM ui_config WHERE key = ?", (key,)).fetchone()
         if row is None:
             return default
         try:

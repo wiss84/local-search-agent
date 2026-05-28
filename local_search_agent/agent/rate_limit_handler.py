@@ -63,16 +63,24 @@ except ImportError:
     _GenaiClientError = None
 
 # Build exception tuples — filter out None entries so except clauses stay valid
-_GOOGLE_SERVER_ERRORS = tuple(e for e in (
-    ServiceUnavailable,
-    InternalServerError,
-    _GenaiServerError,
-) if e is not None)
+_GOOGLE_SERVER_ERRORS = tuple(
+    e
+    for e in (
+        ServiceUnavailable,
+        InternalServerError,
+        _GenaiServerError,
+    )
+    if e is not None
+)
 
-_GOOGLE_RATE_ERRORS = tuple(e for e in (
-    ResourceExhausted,
-    _GenaiClientError,
-) if e is not None)
+_GOOGLE_RATE_ERRORS = tuple(
+    e
+    for e in (
+        ResourceExhausted,
+        _GenaiClientError,
+    )
+    if e is not None
+)
 
 # ---------------------------------------------------------------------------
 # Free-tier rate limits per Google model family
@@ -81,13 +89,13 @@ _GOOGLE_RATE_ERRORS = tuple(e for e in (
 _GOOGLE_LIMITS = {
     "gemini": {
         "requests_per_minute": 15,
-        "tokens_per_minute":   250_000,
-        "requests_per_day":    500,
+        "tokens_per_minute": 250_000,
+        "requests_per_day": 500,
     },
     "gemma-4": {
         "requests_per_minute": 15,
-        "tokens_per_minute":   10_000_000,  # effectively unlimited — not enforced
-        "requests_per_day":    1_500,
+        "tokens_per_minute": 10_000_000,  # effectively unlimited — not enforced
+        "requests_per_day": 1_500,
     },
 }
 
@@ -102,8 +110,8 @@ def _detect_google_limits(model_name: str) -> dict:
     if model_name.startswith("gemma-4-"):
         return _GOOGLE_LIMITS["gemma-4"].copy()
     logger.warning(
-        "RateLimitHandler: unrecognised Google model %r — "
-        "defaulting to Gemma 4 free-tier limits.", model_name
+        "RateLimitHandler: unrecognised Google model %r — defaulting to Gemma 4 free-tier limits.",
+        model_name,
     )
     return _GOOGLE_LIMITS_DEFAULT.copy()
 
@@ -111,6 +119,7 @@ def _detect_google_limits(model_name: str) -> dict:
 # ---------------------------------------------------------------------------
 # RateLimitHandler
 # ---------------------------------------------------------------------------
+
 
 class RateLimitHandler:
     """
@@ -147,26 +156,30 @@ class RateLimitHandler:
         if self._is_google:
             detected = _detect_google_limits(model_name)
             rpm = requests_per_minute or detected["requests_per_minute"]
-            tpm = tokens_per_minute   or detected["tokens_per_minute"]
-            rpd = requests_per_day    or detected["requests_per_day"]
+            tpm = tokens_per_minute or detected["tokens_per_minute"]
+            rpd = requests_per_day or detected["requests_per_day"]
 
             self.rpm_limit = int(rpm * safety_margin)
             self.tpm_limit = int(tpm * safety_margin)
             self.rpd_limit = int(rpd * safety_margin)
 
             self._minute_requests: deque = deque()
-            self._minute_tokens:   deque = deque()
+            self._minute_tokens: deque = deque()
             self._day_request_count: int = 0
             self._load_state()
 
             logger.info(
                 "RateLimitHandler [google/%s]: RPM=%d TPM=%d RPD=%d",
-                model_name, self.rpm_limit, self.tpm_limit, self.rpd_limit,
+                model_name,
+                self.rpm_limit,
+                self.tpm_limit,
+                self.rpd_limit,
             )
         else:
             logger.info(
                 "RateLimitHandler [%s/%s]: retry-only mode (no quota tracking)",
-                provider, model_name,
+                provider,
+                model_name,
             )
 
     # ------------------------------------------------------------------
@@ -197,13 +210,14 @@ class RateLimitHandler:
             logger.warning("RateLimitHandler: could not save %s: %s", PERSISTENCE_FILE, e)
 
     def _load_state(self) -> None:
-        data  = self._load_all()
+        data = self._load_all()
         entry = data.get(self.model_name, {})
         if entry.get("date") == self._today():
             self._day_request_count = entry.get("day_request_count", 0)
             logger.info(
                 "RateLimitHandler [%s]: resumed — %d requests used today.",
-                self.model_name, self._day_request_count,
+                self.model_name,
+                self._day_request_count,
             )
         else:
             self._day_request_count = 0
@@ -211,12 +225,12 @@ class RateLimitHandler:
     def _save_state(self) -> None:
         data = self._load_all()
         data[self.model_name] = {
-            "date":              self._today(),
+            "date": self._today(),
             "day_request_count": self._day_request_count,
-            "saved_at":          self._now_str(),
-            "minute_requests":   f"{self._current_minute_requests()}/{self.rpm_limit}",
-            "minute_tokens":     f"{self._current_minute_tokens()}/{self.tpm_limit}",
-            "day_requests":      f"{self._day_request_count}/{self.rpd_limit}",
+            "saved_at": self._now_str(),
+            "minute_requests": f"{self._current_minute_requests()}/{self.rpm_limit}",
+            "minute_tokens": f"{self._current_minute_tokens()}/{self.tpm_limit}",
+            "day_requests": f"{self._day_request_count}/{self.rpd_limit}",
         }
         self._save_all(data)
 
@@ -225,7 +239,7 @@ class RateLimitHandler:
     # ------------------------------------------------------------------
 
     def _cleanup_windows(self) -> None:
-        now        = time.time()
+        now = time.time()
         minute_ago = now - 60
         while self._minute_requests and self._minute_requests[0] < minute_ago:
             self._minute_requests.popleft()
@@ -254,37 +268,42 @@ class RateLimitHandler:
     def _wait_if_needed(self, estimated_tokens: int) -> None:
         while True:
             self._cleanup_windows()
-            now       = time.time()
+            now = time.time()
             wait_time = 0.0
 
             # Daily quota
             if self._day_request_count >= self.rpd_limit:
-                midnight  = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
                 until_midnight = (midnight.timestamp() + 86_400) - now
                 wait_time = max(wait_time, until_midnight + 1)
                 logger.warning(
                     "RateLimitHandler [%s]: daily limit reached (%d/%d). "
                     "Waiting %.0fs until midnight.",
-                    self.model_name, self._day_request_count, self.rpd_limit, wait_time,
+                    self.model_name,
+                    self._day_request_count,
+                    self.rpd_limit,
+                    wait_time,
                 )
 
             # RPM
             if self._current_minute_requests() >= self.rpm_limit:
-                oldest    = self._minute_requests[0]
+                oldest = self._minute_requests[0]
                 wait_time = max(wait_time, (oldest + 60) - now + 1)
                 logger.info(
                     "RateLimitHandler [%s]: RPM limit reached. Waiting %.1fs.",
-                    self.model_name, wait_time,
+                    self.model_name,
+                    wait_time,
                 )
 
             # TPM
             if self._current_minute_tokens() + estimated_tokens >= self.tpm_limit:
                 if self._minute_tokens:
-                    oldest    = self._minute_tokens[0][0]
+                    oldest = self._minute_tokens[0][0]
                     wait_time = max(wait_time, (oldest + 60) - now + 1)
                     logger.info(
                         "RateLimitHandler [%s]: TPM limit reached. Waiting %.1fs.",
-                        self.model_name, wait_time,
+                        self.model_name,
+                        wait_time,
                     )
 
             if wait_time <= 0:
@@ -292,7 +311,8 @@ class RateLimitHandler:
 
             logger.info(
                 "RateLimitHandler [%s]: sleeping %.1fs for rate limit.",
-                self.model_name, wait_time,
+                self.model_name,
+                wait_time,
             )
             time.sleep(wait_time)
 
@@ -371,20 +391,27 @@ class RateLimitHandler:
             except _GOOGLE_RATE_ERRORS as e:
                 last_exc = e
                 suggested = self._parse_retry_delay(str(e))
-                backoff   = suggested if suggested else self.base_backoff * (2 ** attempt)
+                backoff = suggested if suggested else self.base_backoff * (2**attempt)
                 logger.warning(
                     "RateLimitHandler [%s]: rate limit (attempt %d/%d). Waiting %.1fs.",
-                    self.model_name, attempt + 1, self.max_retries, backoff,
+                    self.model_name,
+                    attempt + 1,
+                    self.max_retries,
+                    backoff,
                 )
                 time.sleep(backoff)
 
             except _GOOGLE_SERVER_ERRORS as e:
                 last_exc = e
                 server_attempts += 1
-                backoff = self.base_backoff * (2 ** attempt)
+                backoff = self.base_backoff * (2**attempt)
                 logger.warning(
                     "RateLimitHandler [%s]: server error %s (attempt %d/%d). Waiting %.1fs.",
-                    self.model_name, type(e).__name__, server_attempts, self.max_retries, backoff,
+                    self.model_name,
+                    type(e).__name__,
+                    server_attempts,
+                    self.max_retries,
+                    backoff,
                 )
                 if server_attempts >= self.max_retries:
                     logger.error(
@@ -409,10 +436,14 @@ class RateLimitHandler:
                 return fn(*args, **kwargs)
             except Exception as e:
                 last_exc = e
-                backoff  = self.base_backoff * (2 ** attempt)
+                backoff = self.base_backoff * (2**attempt)
                 logger.warning(
                     "RateLimitHandler [%s]: error on attempt %d/%d — %s. Waiting %.1fs.",
-                    self.model_name, attempt + 1, self.max_retries, type(e).__name__, backoff,
+                    self.model_name,
+                    attempt + 1,
+                    self.max_retries,
+                    type(e).__name__,
+                    backoff,
                 )
                 time.sleep(backoff)
 
@@ -427,9 +458,9 @@ class RateLimitHandler:
             return {"provider": self.provider, "model": self.model_name, "tracking": "none"}
         self._cleanup_windows()
         return {
-            "provider":       self.provider,
-            "model":          self.model_name,
+            "provider": self.provider,
+            "model": self.model_name,
             "minute_requests": f"{self._current_minute_requests()}/{self.rpm_limit}",
-            "minute_tokens":   f"{self._current_minute_tokens()}/{self.tpm_limit}",
-            "day_requests":    f"{self._day_request_count}/{self.rpd_limit}",
+            "minute_tokens": f"{self._current_minute_tokens()}/{self.tpm_limit}",
+            "day_requests": f"{self._day_request_count}/{self.rpd_limit}",
         }

@@ -59,12 +59,11 @@ def _get_converter():
     if _CONVERTER is None:
         try:
             from docling.document_converter import DocumentConverter  # noqa: PLC0415
+
             _CONVERTER = DocumentConverter()
             logger.info("Docling DocumentConverter initialised (singleton).")
         except ImportError as e:
-            raise ImportError(
-                "Docling is not installed. Run: pip install 'docling>=2.0.0'"
-            ) from e
+            raise ImportError("Docling is not installed. Run: pip install 'docling>=2.0.0'") from e
     return _CONVERTER
 
 
@@ -101,7 +100,7 @@ def _count_pdf_pages(path: str) -> Optional[int]:
         from pypdf import PdfReader  # noqa: PLC0415
 
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore")   # suppress PdfReadWarning noise
+            warnings.filterwarnings("ignore")  # suppress PdfReadWarning noise
             reader = PdfReader(path, strict=False)
             return len(reader.pages)
     except ImportError:
@@ -112,9 +111,7 @@ def _count_pdf_pages(path: str) -> Optional[int]:
     return None
 
 
-def _split_pdf_batch_pymupdf(
-    source_path: str, start: int, end: int
-) -> Optional[str]:
+def _split_pdf_batch_pymupdf(source_path: str, start: int, end: int) -> Optional[str]:
     """
     Split pages [start, end) from *source_path* into a temporary PDF file.
 
@@ -129,9 +126,7 @@ def _split_pdf_batch_pymupdf(
             dst = pymupdf.open()
             # insert_pdf supports page labels / metadata by default
             dst.insert_pdf(src, from_page=start, to_page=end - 1)
-            tf = tempfile.NamedTemporaryFile(
-                suffix=".pdf", delete=False, prefix="lsa_batch_"
-            )
+            tf = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, prefix="lsa_batch_")
             dst.save(tf.name)
             dst.close()
             tf.close()
@@ -145,9 +140,7 @@ def _split_pdf_batch_pymupdf(
         return None
 
 
-def _split_pdf_batch_pypdf(
-    source_path: str, start: int, end: int
-) -> Optional[str]:
+def _split_pdf_batch_pypdf(source_path: str, start: int, end: int) -> Optional[str]:
     """
     Split pages [start, end) from *source_path* into a temporary PDF file
     using pypdf.
@@ -163,9 +156,7 @@ def _split_pdf_batch_pypdf(
         for i in range(start, min(end, len(reader.pages))):
             writer.add_page(reader.pages[i])
 
-        tf = tempfile.NamedTemporaryFile(
-            suffix=".pdf", delete=False, prefix="lsa_batch_"
-        )
+        tf = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, prefix="lsa_batch_")
         with open(tf.name, "wb") as f:
             writer.write(f)
         tf.close()
@@ -209,11 +200,13 @@ def _detect_splitting_lib() -> str:
     """Return the name of the first available PDF splitting library."""
     try:
         import pymupdf  # noqa: F401, PLC0415
+
         return "pymupdf"
     except ImportError:
         pass
     try:
         from pypdf import PdfReader  # noqa: F401, PLC0415
+
         return "pypdf"
     except ImportError:
         pass
@@ -237,8 +230,8 @@ def _convert_pdf_in_batches(
 
     if total_pages is None:
         logger.warning(
-            "No PDF splitting library available — falling back to single-call "
-            "conversion for %r.", convertee_path
+            "No PDF splitting library available — falling back to single-call conversion for %r.",
+            convertee_path,
         )
         return _convert_single(converter, convertee_path)
 
@@ -278,9 +271,7 @@ def _convert_pdf_in_batches(
             warn_parts.append(msg)
             logger.warning("%s", msg)
         except Exception as e:
-            msg = (
-                f"[pages {start + 1}-{end}] skipped: conversion error: {e!r}"
-            )
+            msg = f"[pages {start + 1}-{end}] skipped: conversion error: {e!r}"
             warn_parts.append(msg)
             logger.warning("%s", msg)
         finally:
@@ -362,9 +353,7 @@ class PDFParser(BaseParser):
         except ParserError:
             raise
         except Exception as e:
-            raise ParserError(
-                source_path, f"Docling conversion failed: {e}", original=e
-            )
+            raise ParserError(source_path, f"Docling conversion failed: {e}", original=e)
 
         cleaned_text = clean(raw_markdown)
 

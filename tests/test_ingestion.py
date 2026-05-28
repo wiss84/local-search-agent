@@ -34,6 +34,7 @@ from local_search_agent.workspace.workspace_manager import WorkspaceManager
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def tmp_workspace(tmp_path):
     """
@@ -103,6 +104,7 @@ def _txt_parser(extra_extensions: frozenset[str] = frozenset()) -> MagicMock:
 # File discovery
 # ---------------------------------------------------------------------------
 
+
 class TestFileDiscovery:
     def test_total_count_excludes_zip(self, config, wm, mock_meili, tmp_workspace):
         """
@@ -111,8 +113,10 @@ class TestFileDiscovery:
         Expected: report.txt, handbook.md, data.xlsx, nested.txt → total == 4.
         """
         pipeline = IngestionPipeline(
-            config=config, workspace_manager=wm,
-            meili_client=mock_meili, parsers=[_txt_parser()],
+            config=config,
+            workspace_manager=wm,
+            meili_client=mock_meili,
+            parsers=[_txt_parser()],
         )
         stats = pipeline.run(force=True)
         assert stats.total == 4
@@ -121,8 +125,10 @@ class TestFileDiscovery:
         (tmp_workspace / ".hidden.txt").write_text("hidden", encoding="utf-8")
 
         pipeline = IngestionPipeline(
-            config=config, workspace_manager=wm,
-            meili_client=mock_meili, parsers=[_txt_parser()],
+            config=config,
+            workspace_manager=wm,
+            meili_client=mock_meili,
+            parsers=[_txt_parser()],
         )
         pipeline.run(force=True)
 
@@ -138,8 +144,10 @@ class TestFileDiscovery:
         (hidden_dir / "secret.txt").write_text("secret", encoding="utf-8")
 
         pipeline = IngestionPipeline(
-            config=config, workspace_manager=wm,
-            meili_client=mock_meili, parsers=[_txt_parser()],
+            config=config,
+            workspace_manager=wm,
+            meili_client=mock_meili,
+            parsers=[_txt_parser()],
         )
         stats = pipeline.run(force=True)
         assert stats.total == 4
@@ -147,8 +155,10 @@ class TestFileDiscovery:
     def test_walks_subdirectories(self, config, wm, mock_meili, tmp_workspace):
         """Files in subdirectories must be discovered."""
         pipeline = IngestionPipeline(
-            config=config, workspace_manager=wm,
-            meili_client=mock_meili, parsers=[_txt_parser()],
+            config=config,
+            workspace_manager=wm,
+            meili_client=mock_meili,
+            parsers=[_txt_parser()],
         )
         pipeline.run(force=True)
 
@@ -161,8 +171,10 @@ class TestFileDiscovery:
     def test_no_parser_increments_failed(self, config, wm, mock_meili, tmp_workspace):
         """Files with no matching parser increment stats.failed."""
         pipeline = IngestionPipeline(
-            config=config, workspace_manager=wm,
-            meili_client=mock_meili, parsers=[_txt_parser()],
+            config=config,
+            workspace_manager=wm,
+            meili_client=mock_meili,
+            parsers=[_txt_parser()],
         )
         stats = pipeline.run(force=True)
         # .md (1) + .xlsx (1) have no parser → failed >= 2
@@ -184,8 +196,10 @@ class TestFileDiscovery:
         mock_parser.parse = flaky_parse
 
         pipeline = IngestionPipeline(
-            config=config, workspace_manager=wm,
-            meili_client=mock_meili, parsers=[mock_parser],
+            config=config,
+            workspace_manager=wm,
+            meili_client=mock_meili,
+            parsers=[mock_parser],
         )
         stats = pipeline.run(force=True)
 
@@ -197,13 +211,16 @@ class TestFileDiscovery:
 # Delta / incremental indexing
 # ---------------------------------------------------------------------------
 
+
 class TestDeltaLogic:
     def test_unchanged_files_are_skipped(self, config, wm, mock_meili, tmp_workspace):
         """Running the pipeline twice: files indexed on first run, skipped on second."""
         parser = _txt_parser(extra_extensions=frozenset({".md", ".xlsx"}))
         pipeline = IngestionPipeline(
-            config=config, workspace_manager=wm,
-            meili_client=mock_meili, parsers=[parser],
+            config=config,
+            workspace_manager=wm,
+            meili_client=mock_meili,
+            parsers=[parser],
         )
 
         first = pipeline.run(force=False)
@@ -216,8 +233,10 @@ class TestDeltaLogic:
         """force=True must re-index even files that haven't changed."""
         parser = _txt_parser()
         pipeline = IngestionPipeline(
-            config=config, workspace_manager=wm,
-            meili_client=mock_meili, parsers=[parser],
+            config=config,
+            workspace_manager=wm,
+            meili_client=mock_meili,
+            parsers=[parser],
         )
 
         pipeline.run(force=True)
@@ -231,13 +250,16 @@ class TestDeltaLogic:
 # Batch logic
 # ---------------------------------------------------------------------------
 
+
 class TestBatchLogic:
     def test_batch_size_one_calls_meili_per_file(self, config, wm, mock_meili, tmp_workspace):
         """With batch_size=1 each document triggers a separate Meilisearch call."""
         parser = _txt_parser()
         pipeline = IngestionPipeline(
-            config=config, workspace_manager=wm,
-            meili_client=mock_meili, parsers=[parser],
+            config=config,
+            workspace_manager=wm,
+            meili_client=mock_meili,
+            parsers=[parser],
             batch_size=1,
         )
         stats = pipeline.run(force=True)
@@ -247,8 +269,10 @@ class TestBatchLogic:
         """With batch_size > total files, all docs are flushed in one call."""
         parser = _txt_parser()
         pipeline = IngestionPipeline(
-            config=config, workspace_manager=wm,
-            meili_client=mock_meili, parsers=[parser],
+            config=config,
+            workspace_manager=wm,
+            meili_client=mock_meili,
+            parsers=[parser],
             batch_size=1000,
         )
         stats = pipeline.run(force=True)
@@ -267,27 +291,32 @@ class TestBatchLogic:
         mock_meili.index_documents.side_effect = RuntimeError("Meilisearch unavailable")
         parser = _txt_parser()
         pipeline = IngestionPipeline(
-            config=config, workspace_manager=wm,
-            meili_client=mock_meili, parsers=[parser],
+            config=config,
+            workspace_manager=wm,
+            meili_client=mock_meili,
+            parsers=[parser],
         )
         stats = pipeline.run(force=True)
 
-        assert stats.failed > 0         # flush failure counted
-        assert stats.indexed == 0       # nothing made it into Meilisearch
-        assert len(stats.errors) > 0    # error messages recorded
+        assert stats.failed > 0  # flush failure counted
+        assert stats.indexed == 0  # nothing made it into Meilisearch
+        assert len(stats.errors) > 0  # error messages recorded
 
 
 # ---------------------------------------------------------------------------
 # Progress callback
 # ---------------------------------------------------------------------------
 
+
 class TestProgressCallback:
     def test_callback_called_for_each_file(self, config, wm, mock_meili, tmp_workspace):
         """progress_callback must be called at least once per eligible file."""
         events = []
         pipeline = IngestionPipeline(
-            config=config, workspace_manager=wm,
-            meili_client=mock_meili, parsers=[_txt_parser()],
+            config=config,
+            workspace_manager=wm,
+            meili_client=mock_meili,
+            parsers=[_txt_parser()],
         )
         pipeline.run(force=True, progress_callback=lambda *args: events.append(args))
 
@@ -299,6 +328,7 @@ class TestProgressCallback:
 # ---------------------------------------------------------------------------
 # IngestStats
 # ---------------------------------------------------------------------------
+
 
 class TestIngestStats:
     def test_str_contains_all_key_counts(self):
@@ -320,12 +350,12 @@ class TestIngestStats:
     def test_errors_list_populated_on_failure(self, config, wm, mock_meili, tmp_workspace):
         mock_parser = MagicMock()
         mock_parser.can_parse = lambda p: p.endswith(".txt")
-        mock_parser.parse = MagicMock(
-            side_effect=ParserError("/some/file.txt", "Boom")
-        )
+        mock_parser.parse = MagicMock(side_effect=ParserError("/some/file.txt", "Boom"))
         pipeline = IngestionPipeline(
-            config=config, workspace_manager=wm,
-            meili_client=mock_meili, parsers=[mock_parser],
+            config=config,
+            workspace_manager=wm,
+            meili_client=mock_meili,
+            parsers=[mock_parser],
         )
         stats = pipeline.run(force=True)
 

@@ -27,6 +27,7 @@ from local_search_agent.ingestion.chunker import chunk_document
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_node(tmp_path, text: str, name: str = "doc.txt") -> DocumentNode:
     f = tmp_path / name
     f.write_text(text, encoding="utf-8")
@@ -42,7 +43,7 @@ def _prose(chars: int) -> str:
     # Add realistic line breaks every ~200 chars (simulating paragraphs/sentences)
     lines = []
     for i in range(0, len(text), 200):
-        lines.append(text[i:i+200])
+        lines.append(text[i : i + 200])
     return "\n".join(lines)
 
 
@@ -59,6 +60,7 @@ def _table(rows: int, cols: int = 3) -> str:
 # ---------------------------------------------------------------------------
 # Short document passthrough
 # ---------------------------------------------------------------------------
+
 
 class TestShortDocumentPassthrough:
     def test_short_doc_returned_as_single_chunk(self, tmp_path):
@@ -90,6 +92,7 @@ class TestShortDocumentPassthrough:
 # Prose chunking
 # ---------------------------------------------------------------------------
 
+
 class TestProseChunking:
     def test_long_doc_produces_multiple_chunks(self, tmp_path):
         text = _prose(CHUNK_TARGET_CHARS * 4)
@@ -115,7 +118,7 @@ class TestProseChunking:
         # Sample 10 evenly-spaced substrings and verify each appears somewhere
         step = len(text) // 10
         for i in range(0, len(text) - 20, step):
-            assert text[i:i + 20] in combined
+            assert text[i : i + 20] in combined
 
     def test_chunk_titles_follow_pattern(self, tmp_path):
         text = _prose(CHUNK_TARGET_CHARS * 3)
@@ -194,6 +197,7 @@ class TestProseChunking:
 # Table chunking
 # ---------------------------------------------------------------------------
 
+
 class TestTableChunking:
     def test_table_doc_uses_row_based_chunking(self, tmp_path):
         text = _table(rows=TABLE_ROWS_PER_CHUNK * 3)
@@ -219,7 +223,8 @@ class TestTableChunking:
         # Each chunk should contain at most TABLE_ROWS_PER_CHUNK data rows
         for chunk in chunks:
             data_rows = [
-                line for line in chunk.text.splitlines()
+                line
+                for line in chunk.text.splitlines()
                 if line.strip().startswith("|") and "---" not in line and "Col0" not in line
             ]
             assert len(data_rows) <= TABLE_ROWS_PER_CHUNK
@@ -264,13 +269,17 @@ class TestTableChunking:
         # Middle chunks should NOT contain pre or post blocks
         if len(chunks) > 2:
             for chunk in chunks[1:-1]:
-                assert "This is context before" not in chunk.text or "table" in chunk.text.split("This is context before")[0]  # only if it's the header
+                assert (
+                    "This is context before" not in chunk.text
+                    or "table" in chunk.text.split("This is context before")[0]
+                )  # only if it's the header
                 assert "This is context after" not in chunk.text
 
 
 # ---------------------------------------------------------------------------
 # Break point priority tests
 # ---------------------------------------------------------------------------
+
 
 class TestBreakPointPriority:
     def test_prefers_double_blank_line_over_single_blank_line(self, tmp_path):
@@ -308,7 +317,9 @@ class TestBreakPointPriority:
     def test_sentence_boundary_as_fallback(self, tmp_path):
         """Sentence boundaries (lowest priority) used only when no structural breaks exist."""
         # Create text with NO blank lines or headings, only sentence breaks
-        text = "This is sentence one. This is sentence two. This is sentence three. " * (CHUNK_TARGET_CHARS // 70)
+        text = "This is sentence one. This is sentence two. This is sentence three. " * (
+            CHUNK_TARGET_CHARS // 70
+        )
         text = text * 2  # Make it long enough to chunk
         node = _make_node(tmp_path, text)
         chunks = chunk_document(node)
@@ -324,6 +335,7 @@ class TestBreakPointPriority:
 # ---------------------------------------------------------------------------
 # Fallback and edge case tests
 # ---------------------------------------------------------------------------
+
 
 class TestFallbackLogic:
     def test_fallback_when_no_break_in_target_window(self, tmp_path):
@@ -377,6 +389,7 @@ class TestFallbackLogic:
 # Metadata propagation tests
 # ---------------------------------------------------------------------------
 
+
 class TestMetadataPropagation:
     def test_all_chunks_preserve_source_path(self, tmp_path):
         """All chunks should inherit source_path from original."""
@@ -402,6 +415,3 @@ class TestMetadataPropagation:
         for chunk in chunks:
             assert chunk.modified_at == node.modified_at
             assert chunk.indexed_at == node.indexed_at
-
-
-

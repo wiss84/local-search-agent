@@ -42,6 +42,7 @@ from local_search_agent.ingestion.parsers.xlsx_parser import XLSXParser
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _write(tmp_path: Path, name: str, content: str, encoding: str = "utf-8") -> Path:
     f = tmp_path / name
     f.write_text(content, encoding=encoding)
@@ -55,6 +56,7 @@ def _make_xlsx(tmp_path: Path, name: str, sheets: dict[str, list[list]]) -> Path
     sheets = {"Sheet1": [["Col1", "Col2"], ["A", "B"]], ...}
     """
     import openpyxl
+
     wb = openpyxl.Workbook()
     wb.remove(wb.active)  # remove default empty sheet
     for sheet_name, rows in sheets.items():
@@ -70,25 +72,31 @@ def _make_xlsx(tmp_path: Path, name: str, sheets: dict[str, list[list]]) -> Path
 # HTMLParser — fast, no mocking
 # ---------------------------------------------------------------------------
 
+
 class TestHTMLParser:
     def test_basic_content_extracted(self, tmp_path):
-        f = _write(tmp_path, "page.html",
-                   "<html><body><h1>Report Title</h1><p>Q3 revenue was strong.</p></body></html>")
+        f = _write(
+            tmp_path,
+            "page.html",
+            "<html><body><h1>Report Title</h1><p>Q3 revenue was strong.</p></body></html>",
+        )
         node = HTMLParser().parse(str(f), workspace="test")
         assert "Report Title" in node.text
         assert "Q3 revenue" in node.text
         assert node.file_type == "html"
 
     def test_htm_extension_supported(self, tmp_path):
-        f = _write(tmp_path, "page.htm",
-                   "<html><body><p>Legacy page.</p></body></html>")
+        f = _write(tmp_path, "page.htm", "<html><body><p>Legacy page.</p></body></html>")
         node = HTMLParser().parse(str(f), workspace="test")
         assert "Legacy page" in node.text
         assert node.file_type == "htm"
 
     def test_heading_levels_converted(self, tmp_path):
-        f = _write(tmp_path, "headings.html",
-                   "<html><body><h1>Top</h1><h2>Second</h2><h3>Third</h3></body></html>")
+        f = _write(
+            tmp_path,
+            "headings.html",
+            "<html><body><h1>Top</h1><h2>Second</h2><h3>Third</h3></body></html>",
+        )
         node = HTMLParser().parse(str(f), workspace="test")
         assert "Top" in node.text
         assert "Second" in node.text
@@ -225,11 +233,14 @@ class TestHTMLParser:
 # XLSXParser — fast, uses real openpyxl files
 # ---------------------------------------------------------------------------
 
+
 class TestXLSXParser:
     def test_basic_sheet_extracted(self, tmp_path):
-        f = _make_xlsx(tmp_path, "basic.xlsx", {
-            "Sales": [["Region", "Revenue"], ["North", 120000], ["South", 95000]]
-        })
+        f = _make_xlsx(
+            tmp_path,
+            "basic.xlsx",
+            {"Sales": [["Region", "Revenue"], ["North", 120000], ["South", 95000]]},
+        )
         node = XLSXParser().parse(str(f), workspace="test")
         assert "Sales" in node.text
         assert "North" in node.text
@@ -237,10 +248,14 @@ class TestXLSXParser:
         assert node.file_type == "xlsx"
 
     def test_multiple_sheets_become_sections(self, tmp_path):
-        f = _make_xlsx(tmp_path, "multi.xlsx", {
-            "Q1": [["Month", "Sales"], ["Jan", 10000]],
-            "Q2": [["Month", "Sales"], ["Apr", 15000]],
-        })
+        f = _make_xlsx(
+            tmp_path,
+            "multi.xlsx",
+            {
+                "Q1": [["Month", "Sales"], ["Jan", 10000]],
+                "Q2": [["Month", "Sales"], ["Apr", 15000]],
+            },
+        )
         node = XLSXParser().parse(str(f), workspace="test")
         assert "Q1" in node.text
         assert "Q2" in node.text
@@ -248,14 +263,13 @@ class TestXLSXParser:
         assert "Apr" in node.text
 
     def test_output_is_markdown_table(self, tmp_path):
-        f = _make_xlsx(tmp_path, "table.xlsx", {
-            "Data": [["A", "B"], ["1", "2"]]
-        })
+        f = _make_xlsx(tmp_path, "table.xlsx", {"Data": [["A", "B"], ["1", "2"]]})
         node = XLSXParser().parse(str(f), workspace="test")
         assert "|" in node.text
 
     def test_all_empty_workbook_raises_parser_error(self, tmp_path):
         import openpyxl
+
         wb = openpyxl.Workbook()
         # Default sheet exists but has no data
         path = tmp_path / "empty.xlsx"
@@ -264,26 +278,24 @@ class TestXLSXParser:
             XLSXParser().parse(str(path), workspace="test")
 
     def test_boolean_cells_rendered_as_yes_no(self, tmp_path):
-        f = _make_xlsx(tmp_path, "booleans.xlsx", {
-            "Flags": [["Name", "Active"], ["Alice", True], ["Bob", False]]
-        })
+        f = _make_xlsx(
+            tmp_path,
+            "booleans.xlsx",
+            {"Flags": [["Name", "Active"], ["Alice", True], ["Bob", False]]},
+        )
         node = XLSXParser().parse(str(f), workspace="test")
         assert "Yes" in node.text
         assert "No" in node.text
 
     def test_float_whole_number_no_decimal(self, tmp_path):
         # 42.0 should render as "42", not "42.0"
-        f = _make_xlsx(tmp_path, "floats.xlsx", {
-            "Data": [["Value"], [42.0]]
-        })
+        f = _make_xlsx(tmp_path, "floats.xlsx", {"Data": [["Value"], [42.0]]})
         node = XLSXParser().parse(str(f), workspace="test")
         assert "42" in node.text
         assert "42.0" not in node.text
 
     def test_pipe_chars_escaped_in_cells(self, tmp_path):
-        f = _make_xlsx(tmp_path, "pipes.xlsx", {
-            "Data": [["Code"], ["A|B"]]
-        })
+        f = _make_xlsx(tmp_path, "pipes.xlsx", {"Data": [["Code"], ["A|B"]]})
         node = XLSXParser().parse(str(f), workspace="test")
         assert r"A\|B" in node.text
 
@@ -294,6 +306,7 @@ class TestXLSXParser:
     def test_xlsm_extension_supported(self, tmp_path):
         # .xlsm is a macro-enabled workbook — openpyxl reads them fine
         import openpyxl
+
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Sheet1"
@@ -314,6 +327,7 @@ class TestXLSXParser:
 
     def test_hidden_sheet_skipped_by_default(self, tmp_path):
         import openpyxl
+
         wb = openpyxl.Workbook()
         visible_ws = wb.active
         visible_ws.title = "Visible"
@@ -332,6 +346,7 @@ class TestXLSXParser:
 
     def test_hidden_sheet_included_when_requested(self, tmp_path):
         import openpyxl
+
         wb = openpyxl.Workbook()
         visible_ws = wb.active
         visible_ws.title = "Visible"
@@ -351,6 +366,7 @@ class TestXLSXParser:
 # ---------------------------------------------------------------------------
 # PDFParser — slow, Docling mocked at boundary
 # ---------------------------------------------------------------------------
+
 
 def _make_docling_mock(markdown_output: str):
     """
@@ -394,6 +410,7 @@ class TestPDFParser:
 
         with self._patch_docling("# Q3 Report\n\nRevenue grew 12% year-on-year."):
             from local_search_agent.ingestion.parsers.pdf_parser import PDFParser
+
             node = PDFParser().parse(str(f), workspace="test")
 
         assert "Q3 Report" in node.text
@@ -406,12 +423,14 @@ class TestPDFParser:
 
         with self._patch_docling("Some content."):
             from local_search_agent.ingestion.parsers.pdf_parser import PDFParser
+
             node = PDFParser().parse(str(f), workspace="test")
 
         assert node.file_type == "pdf"
 
     def test_file_not_found_raises(self, tmp_path):
         from local_search_agent.ingestion.parsers.pdf_parser import PDFParser
+
         with pytest.raises(FileNotFoundError):
             PDFParser().parse(str(tmp_path / "missing.pdf"), workspace="test")
 
@@ -427,6 +446,7 @@ class TestPDFParser:
             return_value=mock_converter,
         ):
             from local_search_agent.ingestion.parsers.pdf_parser import PDFParser
+
             with pytest.raises(ParserError):
                 PDFParser().parse(str(f), workspace="test")
 
@@ -437,6 +457,7 @@ class TestPDFParser:
 
         with self._patch_docling("\u201cSmart quotes\u201d and \u2014 em-dash."):
             from local_search_agent.ingestion.parsers.pdf_parser import PDFParser
+
             node = PDFParser().parse(str(f), workspace="test")
 
         # After clean(), smart quotes → straight quotes, em-dash → hyphen
@@ -450,6 +471,7 @@ class TestPDFParser:
 
         with self._patch_docling("# Annual Report\n\nContent."):
             from local_search_agent.ingestion.parsers.pdf_parser import PDFParser
+
             node = PDFParser().parse(str(f), workspace="test", title="My Custom Title")
 
         assert node.title == "My Custom Title"
@@ -460,6 +482,7 @@ class TestPDFParser:
 
         with self._patch_docling("Content."):
             from local_search_agent.ingestion.parsers.pdf_parser import PDFParser
+
             node = PDFParser().parse(str(f), workspace="test")
 
         assert node.title == "financial_summary"
@@ -470,6 +493,7 @@ class TestPDFParser:
 
         with self._patch_docling("Content."):
             from local_search_agent.ingestion.parsers.pdf_parser import PDFParser
+
             node = PDFParser().parse(str(f), workspace="finance_team")
 
         assert node.workspace == "finance_team"
@@ -480,6 +504,7 @@ class TestPDFParser:
 
         with self._patch_docling("Content."):
             from local_search_agent.ingestion.parsers.pdf_parser import PDFParser
+
             node = PDFParser().parse(str(f), workspace="test")
 
         assert str(f.resolve()) == node.source_path
@@ -490,6 +515,7 @@ class TestPDFParser:
 
         with self._patch_docling("Content."):
             from local_search_agent.ingestion.parsers.pdf_parser import PDFParser
+
             node = PDFParser().parse(str(f), workspace="test")
 
         assert len(node.doc_id) == 16
@@ -501,6 +527,7 @@ class TestPDFParser:
 
         with self._patch_docling("CONFIDENTIAL\n\nActual content here.\n\nCONFIDENTIAL"):
             from local_search_agent.ingestion.parsers.pdf_parser import PDFParser
+
             node = PDFParser().parse(str(f), workspace="test")
 
         assert "Actual content here" in node.text
@@ -510,6 +537,7 @@ class TestPDFParser:
 # ---------------------------------------------------------------------------
 # DOCXParser — slow, Docling mocked at boundary
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.slow
 class TestDOCXParser:
@@ -522,6 +550,7 @@ class TestDOCXParser:
     def _make_docx(self, tmp_path: Path, name: str, paragraphs: list[str]) -> Path:
         """Create a minimal real .docx file using python-docx."""
         from docx import Document
+
         doc = Document()
         for text in paragraphs:
             doc.add_paragraph(text)
@@ -537,13 +566,20 @@ class TestDOCXParser:
         )
 
     def test_basic_text_extracted(self, tmp_path):
-        f = self._make_docx(tmp_path, "report.docx", [
-            "Q3 Report",
-            "Revenue grew 12% year-on-year.",
-            "Costs remained flat.",
-        ])
-        with self._patch_docling("# Q3 Report\n\nRevenue grew 12% year-on-year.\n\nCosts remained flat."):
+        f = self._make_docx(
+            tmp_path,
+            "report.docx",
+            [
+                "Q3 Report",
+                "Revenue grew 12% year-on-year.",
+                "Costs remained flat.",
+            ],
+        )
+        with self._patch_docling(
+            "# Q3 Report\n\nRevenue grew 12% year-on-year.\n\nCosts remained flat."
+        ):
             from local_search_agent.ingestion.parsers.docx_parser import DOCXParser
+
             node = DOCXParser().parse(str(f), workspace="test")
 
         assert "Q3 Report" in node.text
@@ -554,11 +590,13 @@ class TestDOCXParser:
         f = self._make_docx(tmp_path, "doc.docx", ["Content."])
         with self._patch_docling("Content."):
             from local_search_agent.ingestion.parsers.docx_parser import DOCXParser
+
             node = DOCXParser().parse(str(f), workspace="test")
         assert node.file_type == "docx"
 
     def test_file_not_found_raises(self, tmp_path):
         from local_search_agent.ingestion.parsers.docx_parser import DOCXParser
+
         with pytest.raises(FileNotFoundError):
             DOCXParser().parse(str(tmp_path / "missing.docx"), workspace="test")
 
@@ -574,6 +612,7 @@ class TestDOCXParser:
             mock_class,
         ):
             from local_search_agent.ingestion.parsers.docx_parser import DOCXParser
+
             with pytest.raises(ParserError):
                 DOCXParser().parse(str(f), workspace="test")
 
@@ -581,6 +620,7 @@ class TestDOCXParser:
         f = self._make_docx(tmp_path, "quotes.docx", ["Content"])
         with self._patch_docling("\u201cSmart quotes\u201d and \u2014 em-dash."):
             from local_search_agent.ingestion.parsers.docx_parser import DOCXParser
+
             node = DOCXParser().parse(str(f), workspace="test")
 
         assert "\u201c" not in node.text
@@ -590,6 +630,7 @@ class TestDOCXParser:
         f = self._make_docx(tmp_path, "annual.docx", ["Annual Report content."])
         with self._patch_docling("# Annual Report\n\nContent."):
             from local_search_agent.ingestion.parsers.docx_parser import DOCXParser
+
             node = DOCXParser().parse(str(f), workspace="test", title="My Custom Title")
         assert node.title == "My Custom Title"
 
@@ -597,6 +638,7 @@ class TestDOCXParser:
         f = self._make_docx(tmp_path, "employee_handbook.docx", ["Content."])
         with self._patch_docling("Content."):
             from local_search_agent.ingestion.parsers.docx_parser import DOCXParser
+
             node = DOCXParser().parse(str(f), workspace="test")
         assert node.title == "employee_handbook"
 
@@ -604,6 +646,7 @@ class TestDOCXParser:
         f = self._make_docx(tmp_path, "doc.docx", ["Content."])
         with self._patch_docling("Content."):
             from local_search_agent.ingestion.parsers.docx_parser import DOCXParser
+
             node = DOCXParser().parse(str(f), workspace="hr_team")
         assert node.workspace == "hr_team"
 
@@ -611,6 +654,7 @@ class TestDOCXParser:
         f = self._make_docx(tmp_path, "doc.docx", ["Content."])
         with self._patch_docling("Content."):
             from local_search_agent.ingestion.parsers.docx_parser import DOCXParser
+
             node = DOCXParser().parse(str(f), workspace="test")
         assert len(node.doc_id) == 16
         assert all(c in "0123456789abcdef" for c in node.doc_id)
@@ -619,6 +663,7 @@ class TestDOCXParser:
         f = self._make_docx(tmp_path, "paged.docx", ["Content."])
         with self._patch_docling("Introduction\n\nPage 1 of 10\n\nSome body text.\n\nPage 2 of 10"):
             from local_search_agent.ingestion.parsers.docx_parser import DOCXParser
+
             node = DOCXParser().parse(str(f), workspace="test")
         assert "Some body text" in node.text
         assert "Page 1 of 10" not in node.text

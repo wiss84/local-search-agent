@@ -24,6 +24,7 @@ from local_search_agent.workspace.workspace_manager import WorkspaceManager
 #   @pytest.mark.integration  — hits real filesystem / SQLite
 #   @pytest.mark.slow         — skipped in fast CI pass
 
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "unit: fast, pure-logic tests (no I/O)")
     config.addinivalue_line("markers", "integration: tests that use filesystem or SQLite")
@@ -31,8 +32,9 @@ def pytest_configure(config):
 
 
 def pytest_addoption(parser):
-    parser.addoption("--fast", action="store_true", default=False,
-                     help="Skip tests marked @pytest.mark.slow")
+    parser.addoption(
+        "--fast", action="store_true", default=False, help="Skip tests marked @pytest.mark.slow"
+    )
 
 
 def pytest_collection_modifyitems(config, items):
@@ -46,6 +48,7 @@ def pytest_collection_modifyitems(config, items):
 # ---------------------------------------------------------------------------
 # Core fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session")
 def fixtures_dir() -> Path:
@@ -146,6 +149,7 @@ def registered_node(wm, workspace, sample_node) -> DocumentNode:
 # ---------------------------------------------------------------------------
 # Mock fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_meili_client():

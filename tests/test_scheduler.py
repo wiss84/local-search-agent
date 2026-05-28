@@ -23,6 +23,7 @@ from local_search_agent.workspace.metadata_db import MetadataDB
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def db(tmp_path):
     return MetadataDB(db_path=str(tmp_path / "test.db"))
@@ -36,6 +37,7 @@ def monitor(db):
 # ---------------------------------------------------------------------------
 # MetadataDB — sync_jobs
 # ---------------------------------------------------------------------------
+
 
 class TestMetadataDBSyncJobs:
     def test_upsert_creates_new_job(self, db):
@@ -104,6 +106,7 @@ class TestMetadataDBSyncJobs:
 # MetadataDB — sync_history
 # ---------------------------------------------------------------------------
 
+
 class TestMetadataDBSyncHistory:
     def test_record_start_returns_id(self, db):
         hid = db.record_sync_start("finance")
@@ -152,6 +155,7 @@ class TestMetadataDBSyncHistory:
 # MetadataDB — staleness
 # ---------------------------------------------------------------------------
 
+
 class TestMetadataDBStaleness:
     def test_never_synced_workspace_is_stale(self, db):
         db.upsert_sync_job("finance")
@@ -186,6 +190,7 @@ class TestMetadataDBStaleness:
 # ---------------------------------------------------------------------------
 # IndexMonitor
 # ---------------------------------------------------------------------------
+
 
 class TestIndexMonitor:
     def test_never_synced_status(self, db, monitor):
@@ -224,10 +229,7 @@ class TestIndexMonitor:
         db.set_sync_complete("finance", 0, 5, "2099-01-01T00:00:00+00:00", "parse failed")
         # set status to error directly
         with db._connect() as conn:
-            conn.execute(
-                "UPDATE sync_jobs SET sync_status='error' WHERE workspace=?",
-                ("finance",)
-            )
+            conn.execute("UPDATE sync_jobs SET sync_status='error' WHERE workspace=?", ("finance",))
         health = monitor.get_workspace_health("finance")
         assert health.status == "error"
 
@@ -256,6 +258,7 @@ class TestIndexMonitor:
         summary = monitor.get_health_summary()
         d = summary.to_dict()
         import json
+
         json.dumps(d)  # Should not raise
 
 
@@ -263,10 +266,12 @@ class TestIndexMonitor:
 # IncrementalSyncScheduler
 # ---------------------------------------------------------------------------
 
+
 class TestIncrementalSyncScheduler:
     def _make_scheduler(self, db, tmp_path):
         from local_search_agent.scheduler.incremental_sync import IncrementalSyncScheduler
         from local_search_agent.workspace.workspace_manager import WorkspaceManager
+
         wm = WorkspaceManager(db_path=str(tmp_path / "test.db"))
         return IncrementalSyncScheduler(
             workspace_manager=wm,
@@ -276,6 +281,7 @@ class TestIncrementalSyncScheduler:
 
     def _make_config(self, tmp_path, workspace="test_ws"):
         from local_search_agent.core.config import SearchAgentConfig
+
         return SearchAgentConfig(
             document_dirs=[str(tmp_path)],
             workspace_name=workspace,
@@ -338,6 +344,7 @@ class TestIncrementalSyncScheduler:
 # ---------------------------------------------------------------------------
 # FastAPI /health/indexes and /workspaces/{name}/history
 # ---------------------------------------------------------------------------
+
 
 class TestHealthIndexesEndpoint:
     def _make_client(self, tmp_path):

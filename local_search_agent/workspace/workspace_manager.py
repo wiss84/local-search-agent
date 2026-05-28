@@ -130,9 +130,7 @@ class WorkspaceManager:
     def get_workspace(self, name: str) -> Optional[dict]:
         """Return a single workspace dict or None if not found."""
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM workspaces WHERE name = ?", (name,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM workspaces WHERE name = ?", (name,)).fetchone()
         return dict(row) if row else None
 
     def delete_workspace(self, name: str) -> None:
@@ -204,9 +202,7 @@ class WorkspaceManager:
 
         # Cold path: SQLite (text is now persisted)
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM documents WHERE doc_id = ?", (doc_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM documents WHERE doc_id = ?", (doc_id,)).fetchone()
         if row is None:
             return None
 
@@ -253,5 +249,5 @@ class WorkspaceManager:
                 "SELECT modified_at FROM documents WHERE doc_id = ?", (doc_id,)
             ).fetchone()
         if row is None:
-            return True     # Never indexed
+            return True  # Never indexed
         return row["modified_at"] != modified_at

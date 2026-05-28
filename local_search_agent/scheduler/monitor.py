@@ -33,14 +33,15 @@ logger = logging.getLogger(__name__)
 @dataclass
 class WorkspaceHealth:
     """Health status for a single workspace."""
+
     workspace: str
-    status: str                     # 'healthy' | 'stale' | 'never_synced' | 'error' | 'running'
+    status: str  # 'healthy' | 'stale' | 'never_synced' | 'error' | 'running'
     last_sync_at: Optional[str]
     next_sync_at: Optional[str]
     doc_count: int
     error_count: int
     last_error: Optional[str]
-    age_minutes: Optional[float]    # Minutes since last sync (None if never synced)
+    age_minutes: Optional[float]  # Minutes since last sync (None if never synced)
 
     def is_healthy(self) -> bool:
         return self.status == "healthy"
@@ -49,6 +50,7 @@ class WorkspaceHealth:
 @dataclass
 class IndexHealthSummary:
     """Aggregate health summary across all workspaces."""
+
     total_workspaces: int = 0
     healthy: int = 0
     stale: int = 0
@@ -108,7 +110,9 @@ class IndexMonitor:
             return None
         return self._job_to_health(job)
 
-    def get_stale_workspaces(self, older_than_minutes: Optional[int] = None) -> list[WorkspaceHealth]:
+    def get_stale_workspaces(
+        self, older_than_minutes: Optional[int] = None
+    ) -> list[WorkspaceHealth]:
         """Return all workspaces that need re-ingestion."""
         threshold = older_than_minutes or self._stale_threshold
         stale_jobs = self._db.get_stale_workspaces(older_than_minutes=threshold)

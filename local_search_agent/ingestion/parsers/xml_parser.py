@@ -114,11 +114,15 @@ class XMLParser(BaseParser):
             tree = ET.parse(source_path)
             root = tree.getroot()
         except ET.ParseError as e:
-            logger.warning("XML parse error for %s, falling back to text extraction: %s", source_path, e)
+            logger.warning(
+                "XML parse error for %s, falling back to text extraction: %s", source_path, e
+            )
             try:
                 raw_text = _fallback_text_extract(source_path)
             except Exception as fe:
-                raise ParserError(source_path, f"XML parsing and fallback both failed: {fe}", original=e)
+                raise ParserError(
+                    source_path, f"XML parsing and fallback both failed: {fe}", original=e
+                )
             cleaned_text = clean(raw_text)
             return DocumentNode.from_file(
                 source_path=source_path,

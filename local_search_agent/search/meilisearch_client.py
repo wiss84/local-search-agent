@@ -68,8 +68,8 @@ class MeilisearchClient:
         self._url = url
         self._api_key = api_key
         self._index_name = index_name
-        self._client = None      # Lazy init
-        self._index = None       # Lazy init
+        self._client = None  # Lazy init
+        self._index = None  # Lazy init
 
     # ------------------------------------------------------------------
     # Lazy initialisation
@@ -157,10 +157,7 @@ class MeilisearchClient:
             if status == "succeeded":
                 return
             if status in ("failed", "canceled"):
-                raise RuntimeError(
-                    f"Meilisearch task {task_uid} {status}: "
-                    f"{task_error}"
-                )
+                raise RuntimeError(f"Meilisearch task {task_uid} {status}: {task_error}")
             time.sleep(_POLL_INTERVAL_S)
         raise TimeoutError(f"Meilisearch task {task_uid} did not complete within {timeout}s")
 
@@ -274,8 +271,13 @@ class MeilisearchClient:
                 attributes_to_crop=["text"],
                 crop_length=snippet_chars // 5,
                 attributes_to_retrieve=[
-                    "doc_id", "title", "file_type", "workspace",
-                    "source_path", "modified_at", "concepts",
+                    "doc_id",
+                    "title",
+                    "file_type",
+                    "workspace",
+                    "source_path",
+                    "modified_at",
+                    "concepts",
                 ],
                 attributes_to_highlight=[],
                 filter=filter_expr,
@@ -294,17 +296,19 @@ class MeilisearchClient:
                 # Strip Meilisearch highlight markers if present
                 snippet = snippet.replace("<em>", "").replace("</em>", "")
 
-            hits.append({
-                "doc_id": hit.get("doc_id", ""),
-                "title": hit.get("title", ""),
-                "file_type": hit.get("file_type", ""),
-                "workspace": hit.get("workspace", ""),
-                "source_path": hit.get("source_path", ""),
-                "modified_at": hit.get("modified_at", ""),
-                "concepts": hit.get("concepts", []),
-                "snippet": snippet,
-                "score": 0.0,  # Meilisearch CE does not expose BM25 scores
-            })
+            hits.append(
+                {
+                    "doc_id": hit.get("doc_id", ""),
+                    "title": hit.get("title", ""),
+                    "file_type": hit.get("file_type", ""),
+                    "workspace": hit.get("workspace", ""),
+                    "source_path": hit.get("source_path", ""),
+                    "modified_at": hit.get("modified_at", ""),
+                    "concepts": hit.get("concepts", []),
+                    "snippet": snippet,
+                    "score": 0.0,  # Meilisearch CE does not expose BM25 scores
+                }
+            )
 
         return hits
 

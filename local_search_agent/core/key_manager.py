@@ -26,16 +26,16 @@ from platformdirs import user_config_dir
 _APP_NAME = "local-search-agent"
 
 _PROVIDER_ENV_VARS: dict[str, str] = {
-    "google":    "GOOGLE_API_KEY",
-    "openai":    "OPENAI_API_KEY",
+    "google": "GOOGLE_API_KEY",
+    "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
-    "ollama":    "",
+    "ollama": "",
 }
 
 SUPPORTED_PROVIDERS = list(_PROVIDER_ENV_VARS.keys())
 
 # LangSmith fixed constants — always the same values
-LANGSMITH_TRACING  = "true"
+LANGSMITH_TRACING = "true"
 LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 
 
@@ -48,13 +48,13 @@ def apply_langsmith_env() -> bool:
     """
     keys = _load()
     api_key = keys.get("langsmith_api_key")
-    project  = keys.get("langsmith_project", "local-search-agent")
+    project = keys.get("langsmith_project", "local-search-agent")
     if not api_key:
         return False
-    os.environ["LANGCHAIN_TRACING_V2"]  = LANGSMITH_TRACING
-    os.environ["LANGCHAIN_ENDPOINT"]    = LANGSMITH_ENDPOINT
-    os.environ["LANGCHAIN_API_KEY"]     = api_key
-    os.environ["LANGCHAIN_PROJECT"]     = project
+    os.environ["LANGCHAIN_TRACING_V2"] = LANGSMITH_TRACING
+    os.environ["LANGCHAIN_ENDPOINT"] = LANGSMITH_ENDPOINT
+    os.environ["LANGCHAIN_API_KEY"] = api_key
+    os.environ["LANGCHAIN_PROJECT"] = project
     return True
 
 
@@ -64,7 +64,7 @@ def set_langsmith(api_key: str, project: str) -> None:
         raise ValueError("LangSmith API key must not be empty.")
     keys = _load()
     keys["langsmith_api_key"] = api_key.strip()
-    keys["langsmith_project"]  = project.strip() or "local-search-agent"
+    keys["langsmith_project"] = project.strip() or "local-search-agent"
     _save(keys)
     apply_langsmith_env()
 
@@ -79,8 +79,12 @@ def delete_langsmith() -> bool:
             changed = True
     if changed:
         _save(keys)
-        for var in ("LANGCHAIN_TRACING_V2", "LANGCHAIN_ENDPOINT",
-                    "LANGCHAIN_API_KEY", "LANGCHAIN_PROJECT"):
+        for var in (
+            "LANGCHAIN_TRACING_V2",
+            "LANGCHAIN_ENDPOINT",
+            "LANGCHAIN_API_KEY",
+            "LANGCHAIN_PROJECT",
+        ):
             os.environ.pop(var, None)
     return changed
 
@@ -89,7 +93,7 @@ def get_langsmith() -> dict:
     """Return saved LangSmith config (api_key masked, project plain)."""
     keys = _load()
     api_key = keys.get("langsmith_api_key", "")
-    project  = keys.get("langsmith_project", "")
+    project = keys.get("langsmith_project", "")
     if api_key and len(api_key) > 8:
         masked = api_key[:6] + "*" * (len(api_key) - 10) + api_key[-4:]
     elif api_key:
@@ -127,6 +131,7 @@ def _save(keys: dict[str, str]) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def set_key(provider: str, key: str) -> None:
     """
     Save an API key for a provider.
@@ -134,8 +139,7 @@ def set_key(provider: str, key: str) -> None:
     """
     if provider not in SUPPORTED_PROVIDERS:
         raise ValueError(
-            f"Unknown provider {provider!r}. "
-            f"Supported: {', '.join(SUPPORTED_PROVIDERS)}"
+            f"Unknown provider {provider!r}. Supported: {', '.join(SUPPORTED_PROVIDERS)}"
         )
     if provider == "ollama":
         raise ValueError("Ollama does not use an API key.")
@@ -304,9 +308,9 @@ def models_file_path() -> str:
 # ---------------------------------------------------------------------------
 
 _SEMANTIC_DEFAULTS: dict[str, bool] = {
-    "enable_semantic":        False,
+    "enable_semantic": False,
     "enable_query_expansion": False,
-    "enable_link_graph":      False,
+    "enable_link_graph": False,
 }
 
 
@@ -348,9 +352,9 @@ def get_semantic_settings() -> dict[str, bool]:
     """
     s = _load_settings()
     return {
-        "enable_semantic":        bool(s.get("enable_semantic",        False)),
+        "enable_semantic": bool(s.get("enable_semantic", False)),
         "enable_query_expansion": bool(s.get("enable_query_expansion", False)),
-        "enable_link_graph":      bool(s.get("enable_link_graph",      False)),
+        "enable_link_graph": bool(s.get("enable_link_graph", False)),
     }
 
 
@@ -365,8 +369,7 @@ def set_semantic_setting(key: str, value: bool) -> None:
     """
     if key not in _SEMANTIC_DEFAULTS:
         raise ValueError(
-            f"Unknown semantic setting {key!r}. "
-            f"Valid keys: {', '.join(_SEMANTIC_DEFAULTS)}"
+            f"Unknown semantic setting {key!r}. Valid keys: {', '.join(_SEMANTIC_DEFAULTS)}"
         )
     settings = _load_settings()
     settings[key] = bool(value)
@@ -379,11 +382,13 @@ def set_all_semantic_settings(
     enable_link_graph: bool,
 ) -> None:
     """Set all three semantic flags in one atomic write."""
-    _save_settings({
-        "enable_semantic":        bool(enable_semantic),
-        "enable_query_expansion": bool(enable_query_expansion),
-        "enable_link_graph":      bool(enable_link_graph),
-    })
+    _save_settings(
+        {
+            "enable_semantic": bool(enable_semantic),
+            "enable_query_expansion": bool(enable_query_expansion),
+            "enable_link_graph": bool(enable_link_graph),
+        }
+    )
 
 
 def settings_file_path() -> str:

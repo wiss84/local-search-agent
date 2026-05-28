@@ -26,6 +26,7 @@ import unicodedata
 # Individual cleaning steps
 # ---------------------------------------------------------------------------
 
+
 def normalize_unicode(text: str) -> str:
     """
     Normalize Unicode to NFC form and replace common typographic substitutions.
@@ -39,19 +40,19 @@ def normalize_unicode(text: str) -> str:
     """
     text = unicodedata.normalize("NFC", text)
     replacements = {
-        "\u2018": "'",   # left single quotation mark
-        "\u2019": "'",   # right single quotation mark
-        "\u201c": '"',   # left double quotation mark
-        "\u201d": '"',   # right double quotation mark
-        "\u2014": "-",   # em dash
-        "\u2013": "-",   # en dash
-        "\u00a0": " ",   # non-breaking space
-        "\u200b": "",    # zero-width space
-        "\u200c": "",    # zero-width non-joiner
-        "\u200d": "",    # zero-width joiner
-        "\ufeff": "",    # BOM
-        "\u00ad": "",    # soft hyphen
-        "\u2026": "...", # horizontal ellipsis
+        "\u2018": "'",  # left single quotation mark
+        "\u2019": "'",  # right single quotation mark
+        "\u201c": '"',  # left double quotation mark
+        "\u201d": '"',  # right double quotation mark
+        "\u2014": "-",  # em dash
+        "\u2013": "-",  # en dash
+        "\u00a0": " ",  # non-breaking space
+        "\u200b": "",  # zero-width space
+        "\u200c": "",  # zero-width non-joiner
+        "\u200d": "",  # zero-width joiner
+        "\ufeff": "",  # BOM
+        "\u00ad": "",  # soft hyphen
+        "\u2026": "...",  # horizontal ellipsis
     }
     for src, dst in replacements.items():
         text = text.replace(src, dst)

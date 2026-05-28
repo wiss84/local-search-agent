@@ -126,9 +126,7 @@ class LinkGraph:
         """
         now = _now_iso()
         rows = [
-            (src, tgt, rel, max(0.0, min(1.0, w)), now)
-            for src, tgt, rel, w in links
-            if src != tgt
+            (src, tgt, rel, max(0.0, min(1.0, w)), now) for src, tgt, rel, w in links if src != tgt
         ]
         if not rows:
             return
@@ -145,9 +143,7 @@ class LinkGraph:
     def delete_links_for_doc(self, doc_id: str) -> None:
         """Remove all links where this document is the source (used when re-indexing)."""
         with self._lock, self._connect() as conn:
-            conn.execute(
-                "DELETE FROM doc_links WHERE source_doc_id=?", (doc_id,)
-            )
+            conn.execute("DELETE FROM doc_links WHERE source_doc_id=?", (doc_id,))
 
     # ------------------------------------------------------------------
     # Query
@@ -202,7 +198,7 @@ class LinkGraph:
 
     def build_same_topic_links(
         self,
-        nodes: list,       # list of DocumentNode
+        nodes: list,  # list of DocumentNode
         min_shared_concepts: int = 3,
         weight: float = 0.7,
     ) -> int:
@@ -216,7 +212,7 @@ class LinkGraph:
 
         for i, node_a in enumerate(nodes):
             concepts_a = set(c.lower() for c in node_a.concepts)
-            for node_b in nodes[i + 1:]:
+            for node_b in nodes[i + 1 :]:
                 concepts_b = set(c.lower() for c in node_b.concepts)
                 shared = concepts_a & concepts_b
                 if len(shared) >= min_shared_concepts:
@@ -228,4 +224,4 @@ class LinkGraph:
         if links:
             self.add_links_batch(links)
 
-        return len(links) // 2   # number of document pairs linked
+        return len(links) // 2  # number of document pairs linked

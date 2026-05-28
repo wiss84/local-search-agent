@@ -97,7 +97,9 @@ def build_fetch_tool(config):
         if len(text) > _MAX_FETCH_CHARS:
             logger.info(
                 "Document %r truncated from %d to %d chars for context window.",
-                doc_id, len(text), _MAX_FETCH_CHARS,
+                doc_id,
+                len(text),
+                _MAX_FETCH_CHARS,
             )
             text = (
                 text[:_MAX_FETCH_CHARS]

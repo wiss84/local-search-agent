@@ -20,6 +20,7 @@ from local_search_agent.ingestion.cleaner import (
 # Individual step tests
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizeUnicode:
     def test_smart_quotes_replaced(self):
         assert normalize_unicode("\u201cHello\u201d") == '"Hello"'
@@ -91,7 +92,6 @@ class TestStripPageNumbers:
         assert "project started" in result
 
 
-
 class TestFixBrokenWords:
     def test_rejoins_hyphenated_linebreak(self):
         text = "implemen-\ntation of the"
@@ -145,6 +145,7 @@ class TestRemoveControlCharacters:
 # Full pipeline test
 # ---------------------------------------------------------------------------
 
+
 class TestCleanPipeline:
     def test_full_pipeline_on_realistic_pdf_extract(self):
         """Simulate messy text that would come from a PDF parser."""
@@ -166,8 +167,8 @@ class TestCleanPipeline:
 
         assert "CONFIDENTIAL" not in result
         assert "Page 3 of 12" not in result
-        assert "Project Alpha" in result         # hyphen rejoined
+        assert "Project Alpha" in result  # hyphen rejoined
         assert "$1.2M" in result
-        assert "Revenue" in result               # table preserved
+        assert "Revenue" in result  # table preserved
         assert "strong quarter" in result
         assert result.endswith("\n")

@@ -89,8 +89,7 @@ def _estimate_docx_output_chars(filename: str) -> Optional[int]:
     estimated = int(para_total + table_total)
 
     logger.debug(
-        "DOCX size estimate for %r: ~%d chars  "
-        "(paras=%d × %.0f avg + tables=%d × ~%.0f)",
+        "DOCX size estimate for %r: ~%d chars  (paras=%d × %.0f avg + tables=%d × ~%.0f)",
         filename,
         estimated,
         total_paras,
@@ -102,7 +101,8 @@ def _estimate_docx_output_chars(filename: str) -> Optional[int]:
 
 
 def _build_sub_docx(
-    paragraphs: list, tables: list,
+    paragraphs: list,
+    tables: list,
 ) -> Optional[bytes]:
     """
     Build a valid .docx binary (in-memory) containing only *paragraphs* and
@@ -163,9 +163,7 @@ def _split_docx_in_batches(
     try:
         src = Document(io.BytesIO(docx_bytes))
     except Exception as e:
-        raise ParserError(
-            source_path, f"python-docx failed to parse input: {e!r}", original=e
-        )
+        raise ParserError(source_path, f"python-docx failed to parse input: {e!r}", original=e)
 
     all_paragraphs: list = list(src.paragraphs)
     all_tables: list = list(src.tables)
@@ -173,9 +171,7 @@ def _split_docx_in_batches(
 
     if total_paras == 0:
         # No paragraphs — let docling handle whatever structure exists.
-        raise ParserError(
-            source_path, "python-docx found no paragraphs (invalid or empty?)."
-        )
+        raise ParserError(source_path, "python-docx found no paragraphs (invalid or empty?).")
 
     # --- Determine batch size in paragraphs ---
     # We estimate the output char count from a sample, divide the total
@@ -191,8 +187,7 @@ def _split_docx_in_batches(
     num_batches = max(2, (est_total_chars // DOCX_CHAR_SPLIT_THRESHOLD) + 1)
     paras_per_batch = max(1, total_paras // num_batches)
     logger.info(
-        "Large DOCX (%d paras, ~%d est. chars) — splitting to %d batches "
-        "(~%d paras each)",
+        "Large DOCX (%d paras, ~%d est. chars) — splitting to %d batches (~%d paras each)",
         total_paras,
         est_total_chars,
         num_batches,
@@ -222,9 +217,7 @@ def _split_docx_in_batches(
             batch_num += 1
             continue
 
-        tf = tempfile.NamedTemporaryFile(
-            suffix=".docx", delete=False, prefix="docx_batch_"
-        )
+        tf = tempfile.NamedTemporaryFile(suffix=".docx", delete=False, prefix="docx_batch_")
         tf.write(sub_bytes)
         tf.close()
 
@@ -325,10 +318,10 @@ class DOCXParser(BaseParser):
         # Estimate output size safely — failures fall through to single-call.
         try:
             import docx  # noqa: F401 — checks python-docx availability
+
             estimated_chars = _estimate_docx_output_chars(source_path)
             use_batching = bool(
-                estimated_chars is not None
-                and estimated_chars > DOCX_CHAR_SPLIT_THRESHOLD
+                estimated_chars is not None and estimated_chars > DOCX_CHAR_SPLIT_THRESHOLD
             )
         except ImportError as e:
             raise ParserError(
@@ -357,9 +350,7 @@ class DOCXParser(BaseParser):
         except ParserError:
             raise
         except Exception as e:
-            raise ParserError(
-                source_path, f"Docling conversion failed: {e}", original=e
-            )
+            raise ParserError(source_path, f"Docling conversion failed: {e}", original=e)
 
         cleaned_text = clean(raw_markdown)
 

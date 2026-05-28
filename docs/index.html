@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Docs</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+
+<style>
+:root {
+  --bg:#F8FAFC;
+  --surface:#fff;
+  --border:#E2E8F0;
+  --text:#0F172A;
+  --muted:#64748B;
+  --accent:#4F6EF7;
+  --code:#EEF2F7;
+  --radius:10px;
+  --sidebar:260px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+[data-theme="dark"] {
+  --bg:#0B1220;
+  --surface:#0F172A;
+  --border:#1F2937;
+  --text:#E5E7EB;
+  --muted:#94A3B8;
+  --code:#0F172A;
+  --accent:#7C9CFF;
+}
+
+* { box-sizing:border-box; margin:0; padding:0; }
+
+body {
+  font-family:system-ui,-apple-system,Segoe UI,Roboto;
+  background:var(--bg);
+  color:var(--text);
+  height:100vh;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+
+header {
+  display:flex;
+  align-items:center;
+  padding:14px 18px;
+  background:var(--surface);
+  border-bottom:1px solid var(--border);
+}
+
+header h1 { font-size:14px; font-weight:700; }
+
+.version {
+  margin-left:10px;
+  font-size:11px;
+  color:var(--muted);
+  border:1px solid var(--border);
+  padding:2px 8px;
+  border-radius:999px;
+}
+
+button.theme-btn {
+  margin-left:auto;
+  width:34px; height:34px;
+  border-radius:8px;
+  border:1px solid var(--border);
+  background:var(--surface);
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer;
+  font-size:16px;
+}
+
+#layout { display:flex; flex:1; overflow:hidden; }
+
+nav {
+  width:var(--sidebar);
+  background:var(--surface);
+  border-right:1px solid var(--border);
+  overflow:auto;
+  padding:12px;
+}
+
+.group-title {
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:var(--text);
+  font-weight:700;
+  margin:14px 8px 8px;
+}
+
+nav a {
+  display:block;
+  padding:7px 10px;
+  margin:2px 4px;
+  border-radius:6px;
+  text-decoration:none;
+  color:var(--muted);
+  font-size:13px;
+}
+
+nav a:hover { background:#EEF2FF; color:var(--text); }
+nav a.active { background:#EEF2FF; color:var(--accent); font-weight:600; }
+
+#content { flex:1; overflow:auto; padding:48px 24px; }
+
+.inner { max-width:860px; margin:0 auto; line-height:1.75; }
+.inner p { margin:12px 0; }
+
+code:not(pre code) {
+  background:#FEE2E2;
+  color:#B91C1C;
+  padding:2px 6px;
+  border-radius:6px;
+}
+
+pre {
+  position:relative;
+  background:var(--code);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:16px;
+  margin:18px 0;
+  overflow:auto;
+}
+
+pre code { font-family:var(--mono); font-size:13px; }
+
+.copy-btn {
+  position:absolute; top:8px; right:8px;
+  width:30px; height:30px;
+  border-radius:8px;
+  border:1px solid var(--border);
+  background:var(--surface);
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer;
+}
+
+.copy-btn svg { width:15px; height:15px; fill:var(--muted); }
+</style>
+</head>
+
+<body>
+<header>
+  <h1>Docs</h1>
+  <span class="version">v0.1.0</span>
+  <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙</button>
+</header>
+
+<div id="layout">
+  <nav>
+        <div class="group">
+          <div class="group-title">Introduction</div>
+          <ul class="group-list">
+            <li><a href="#" data-file="architecture.md">Architecture</a></li><li><a href="#" data-file="getting-started.md">Getting Started</a></li><li><a href="#" data-file="installation.md">Installation</a></li><li><a href="#" data-file="configuration.md">Configuration</a></li>
+          </ul>
+        </div>
+        
+        <div class="group">
+          <div class="group-title">Core Concepts</div>
+          <ul class="group-list">
+            <li><a href="#" data-file="ingestion.md">Ingestion</a></li><li><a href="#" data-file="semantic-search.md">Semantic Search</a></li><li><a href="#" data-file="multi-workspace.md">Multi Workspace</a></li>
+          </ul>
+        </div>
+        
+        <div class="group">
+          <div class="group-title">Reference</div>
+          <ul class="group-list">
+            <li><a href="#" data-file="cli-reference.md">Cli Reference</a></li><li><a href="#" data-file="api-reference.md">Api Reference</a></li>
+          </ul>
+        </div>
+        
+        <div class="group">
+          <div class="group-title">Help</div>
+          <ul class="group-list">
+            <li><a href="#" data-file="troubleshooting.md">Troubleshooting</a></li>
+          </ul>
+        </div>
+        </nav>
+  <div id="content">
+    <div class="inner">Loading...</div>
+  </div>
+</div>
+
+<script>
+const defaultFile = 'architecture.md';
+const links = document.querySelectorAll("nav a");
+
+/* ── THEME ──────────────────────────────────────────────────────────────── */
+function _applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  document.getElementById("themeBtn").textContent = theme === "dark" ? "☀️" : "🌙";
+}
+function toggleTheme() {
+  const next = (document.documentElement.getAttribute("data-theme") || "light") === "dark"
+    ? "light" : "dark";
+  localStorage.setItem("theme", next);
+  _applyTheme(next);
+}
+_applyTheme(localStorage.getItem("theme") || "light");
+
+/* ── COPY BUTTONS ───────────────────────────────────────────────────────── */
+function addCopyButtons() {
+  document.querySelectorAll("pre").forEach(pre => {
+    if (pre.querySelector(".copy-btn")) return;
+    const btn = document.createElement("button");
+    btn.className = "copy-btn";
+    btn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm4 4H8a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 18H8V7h12v16z"/></svg>`;
+    btn.onclick = () => navigator.clipboard.writeText(pre.innerText);
+    pre.appendChild(btn);
+  });
+}
+
+/* ── MARKED RENDERER ────────────────────────────────────────────────────
+   marked v12 via new marked.Renderer() uses positional args:
+     link(href, title, text)
+   NOT a destructured token object. The token API only applies when using
+   marked.use() with useNewRenderer:true (v13+).
+
+   We rewrite .md hrefs to href="#" and store the filename in data-md so
+   the browser never sees a navigable URL. Without this, the browser starts
+   navigation synchronously on click — before any JS handler runs — which
+   is why e.preventDefault() in a delegated listener was always too late.
+────────────────────────────────────────────────────────────────────────── */
+const renderer = new marked.Renderer();
+renderer.link = function(href, title, text) {
+  if (href && href.endsWith(".md")) {
+    const file = href.split("/").pop();
+    return `<a href="#" data-md="${file}">${text}</a>`;
+  }
+  const titleAttr = title ? ` title="${title}"` : "";
+  return `<a href="${href}"${titleAttr} target="_blank" rel="noopener">${text}</a>`;
+};
+marked.setOptions({ renderer });
+
+/* ── INTERNAL LINK CLICKS (attached once) ───────────────────────────────── */
+document.querySelector(".inner").addEventListener("click", (e) => {
+  const a = e.target.closest("a[data-md]");
+  if (!a) return;
+  e.preventDefault();
+  loadDoc(a.dataset.md);
+});
+
+/* ── LOAD DOC ───────────────────────────────────────────────────────────── */
+async function loadDoc(file) {
+  const res = await fetch("/help/" + file);
+  const md = await res.text();
+
+  const inner = document.querySelector(".inner");
+  inner.innerHTML = marked.parse(md);
+
+  Prism.highlightAll();
+  addCopyButtons();
+
+  document.getElementById("content").scrollTop = 0;
+
+  links.forEach(l => l.classList.toggle("active", l.dataset.file === file));
+}
+
+links.forEach(l => {
+  l.onclick = e => { e.preventDefault(); loadDoc(l.dataset.file); };
+});
+
+loadDoc(defaultFile);
+</script>
+
+</body>
+</html>

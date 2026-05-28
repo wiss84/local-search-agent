@@ -1,0 +1,1336 @@
+<script>
+/* =============================================================
+   CONFIG
+   ============================================================= */
+const API = 'http://127.0.0.1:{{ port }}/api/ui';
+const MODEL_CONTEXT_LIMITS = {
+  'gemma-4-31b-it':        256000,
+  'gemma-4-26b-a4b-it':    256000,
+  'gemini-3.1-flash-lite': 256000,
+  'gpt-4o':                128000,
+  'gpt-4-turbo':           128000,
+  'claude-opus-4':         200000,
+  'claude-sonnet-4':       200000,
+};
+
+function getModelContextLimit(model) {
+  if (!model) return 0;
+  if (MODEL_CONTEXT_LIMITS[model] !== undefined) return MODEL_CONTEXT_LIMITS[model];
+  if (model.startsWith('gemma-'))    return 256000;
+  if (model.startsWith('gemini-'))   return 1000000;
+  if (model.startsWith('gpt-'))      return 128000;
+  if (model.startsWith('claude-'))   return 200000;
+  return 0;
+}
+
+/* =============================================================
+   STATE
+   ============================================================= */
+const state = {
+  workspace: null,
+  workspaces: [],
+  sessionId: null,
+  sessions: [],
+  drawerPinned: false,
+  streaming: false,
+  queryHistory: [],
+  historyIndex: -1,
+  sessionTokens: { query: 0, reply: 0 },
+  provider: 'google',
+  model: 'gemma-4-31b-it',
+  activeToolCards: {},
+};
+
+/* =============================================================
+   DOM REFS
+   ============================================================= */
+const $ = id => document.getElementById(id);
+const dom = {
+  messages:        $('messages'),
+  queryInput:      $('query-input'),
+  btnSend:         $('btn-send'),
+  drawerContent:   $('drawer-content'),
+  drawerEmpty:     $('drawer-empty'),
+  toolDrawer:      $('tool-drawer'),
+  sessionList:     $('session-list'),
+  workspaceSelect: $('workspace-select'),
+  providerSelect:  $('provider-select'),
+  modelInput:      $('model-input'),
+  tokenLabel:      $('token-label'),
+  tokenBar:        $('token-bar'),
+  dotServer:       $('dot-server'),
+  dotMeili:        $('dot-meili'),
+  agentMsg:        $('status-agent-msg'),
+};
+
+/* =============================================================
+   UTILITIES
+   ============================================================= */
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || res.statusText);
+  }
+  return res.json();
+}
+
+function fmtTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function renderMarkdown(text) {
+  const html = marked.parse(text, { breaks: true });
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+  return wrap.innerHTML;
+}
+
+function scrollBottom() {
+  dom.messages.scrollTop = dom.messages.scrollHeight;
+}
+
+function autoResizeTextarea() {
+  const ta = dom.queryInput;
+  if (!ta) return;
+  ta.style.height = 'auto';
+  const minH = 66; // 3 lines at 14px font, 1.5 line-height + padding
+  ta.style.height = Math.max(minH, Math.min(ta.scrollHeight, 150)) + 'px';
+}
+
+function toolColor(toolName) {
+  if (toolName.includes('search')) return 'search';
+  if (toolName.includes('fetch') || toolName.includes('read')) return 'fetch';
+  if (toolName.includes('graph') || toolName.includes('link')) return 'graph';
+  return 'search';
+}
+
+function _new_call_id() {
+  return Math.random().toString(36).substr(2, 9);
+}
+
+/* =============================================================
+   HEALTH POLLING
+   ============================================================= */
+async function pollHealth() {
+  try {
+    const h = await api('/health');
+    dom.dotServer.className = 'status-dot ok';
+    // Meilisearch can be "ok", "offline", or error message; we show ok or err
+    const meiliStatus = (h && h.meilisearch === 'ok') ? 'ok' : 'err';
+    dom.dotMeili.className  = `status-dot ${meiliStatus}`;
+    if (meiliStatus !== 'ok') {
+      console.warn('Meilisearch status:', h.meilisearch);
+    }
+  } catch (e) {
+    console.error('Health check failed:', e);
+    dom.dotServer.className = 'status-dot err';
+    dom.dotMeili.className  = 'status-dot unknown';
+  }
+}
+
+/* =============================================================
+   WORKSPACES
+   ============================================================= */
+async function loadWorkspaces() {
+  try {
+    const data = await api('/workspaces');
+    state.workspaces = data.workspaces || [];
+    console.log('Loaded workspaces:', state.workspaces);
+    
+    if (state.workspaces.length === 0) {
+      dom.workspaceSelect.innerHTML = '<option disabled selected>Create a workspace to begin</option>';
+      dom.workspaceSelect.disabled = true;
+      console.warn('No workspaces found. Create one via "+ Workspace" button.');
+    } else {
+      dom.workspaceSelect.disabled = false;
+      dom.workspaceSelect.innerHTML = state.workspaces
+        .map(w => `<option value="${escHtml(w.name)}">${escHtml(w.name)}</option>`)
+        .join('');
+      if (!state.workspace && state.workspaces.length > 0) {
+        state.workspace = state.workspaces[0].name;
+      }
+      if (state.workspace) dom.workspaceSelect.value = state.workspace;
+    }
+  } catch (e) {
+    console.error('loadWorkspaces failed:', e);
+    dom.workspaceSelect.innerHTML = '<option disabled selected>Error loading workspaces</option>';
+    dom.workspaceSelect.disabled = true;
+  }
+}
+
+dom.workspaceSelect.addEventListener('change', async () => {
+  state.workspace = dom.workspaceSelect.value;
+  state.sessionId = null;
+  state.sessionTokens = { query: 0, reply: 0 };
+  updateTokenDisplay();
+  await loadSessions();
+  clearDrawer();
+  dom.messages.innerHTML = '';
+});
+
+/* =============================================================
+   SESSIONS
+   ============================================================= */
+async function loadSessions() {
+  if (!state.workspace) return;
+  try {
+    const data = await api(`/sessions?workspace=${encodeURIComponent(state.workspace)}`);
+    state.sessions = data.sessions || [];
+    renderSessionList();
+  } catch (e) {
+    console.warn('loadSessions:', e);
+  }
+}
+
+function renderSessionList() {
+  dom.sessionList.innerHTML = '';
+  if (state.sessions.length === 0) {
+    dom.sessionList.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--text-muted)">No sessions yet.</div>';
+    return;
+  }
+  state.sessions.forEach(s => {
+    const el = document.createElement('div');
+    el.className = 'session-item' + (s.session_id === state.sessionId ? ' active' : '');
+    el.dataset.sid = s.session_id;
+    el.innerHTML = `
+      <div class="session-item-row">
+        <div class="session-item-title">${escHtml(s.title)}</div>
+        <button class="btn-delete-session" title="Delete session">✕</button>
+      </div>
+      <div class="session-item-meta">${fmtDate(s.updated_at)}</div>
+    `;
+    el.querySelector('.session-item-title').addEventListener('click', () => loadSession(s.session_id));
+    el.querySelector('.btn-delete-session').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Delete session "${s.title}"?`)) return;
+      try {
+        await api(`/sessions/${s.session_id}`, { method: 'DELETE' });
+        if (state.sessionId === s.session_id) {
+          state.sessionId = null;
+          dom.messages.innerHTML = '';
+          clearDrawer();
+          state.sessionTokens = { query: 0, reply: 0 };
+          updateTokenDisplay();
+        }
+        await loadSessions();
+      } catch (e) { alert('Delete failed: ' + e.message); }
+    });
+    // Parent click only fires when NOT clicking the title or delete button
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.btn-delete-session') || e.target.closest('.session-item-title')) return;
+      loadSession(s.session_id);
+    });
+    dom.sessionList.appendChild(el);
+  });
+}
+
+async function loadSession(sessionId) {
+  state.sessionId = sessionId;
+  state.sessionTokens = { query: 0, reply: 0 };
+  tokenDatapoints.length = 0;
+  dom.messages.innerHTML = '';
+  clearDrawer();
+  renderSessionList();
+  try {
+    const data = await api(`/sessions/${sessionId}/messages`);
+    (data.messages || []).forEach(m => appendMessage(m.role, m.content, {
+      time: m.created_at,
+      toolCalls: m.tool_calls,
+      thinking: m.thinking,
+    }));
+    const tok = await api(`/sessions/${sessionId}/tokens`);
+    state.sessionTokens = { query: tok.token_query, reply: tok.token_reply };
+    // Seed sparkline with one historical point so it shows something on reload
+    if ((tok.token_query + tok.token_reply) > 0) {
+      tokenDatapoints.push({ t: Date.now(), cumulative: tok.token_query + tok.token_reply });
+    }
+    updateTokenDisplay();
+    scrollBottom();
+  } catch (e) {
+    console.warn('loadSession:', e);
+  }
+}
+
+async function newChat() {
+  if (!state.workspace) return;
+  try {
+    const s = await api('/sessions', { method: 'POST', body: JSON.stringify({ workspace: state.workspace }) });
+    state.sessionId = s.session_id;
+    state.sessionTokens = { query: 0, reply: 0 };
+    tokenDatapoints.length = 0;
+    dom.messages.innerHTML = '';
+    clearDrawer();
+    updateTokenDisplay();
+    await loadSessions();
+    renderSessionList();
+  } catch (e) {
+    console.warn('newChat:', e);
+  }
+}
+
+$('btn-new-chat').addEventListener('click', newChat);
+
+/* =============================================================
+   MESSAGES
+   ============================================================= */
+function appendMessage(role, content, opts = {}) {
+  const el = document.createElement('div');
+  el.className = `msg ${role}`;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble' + (opts.error ? ' error-bubble' : '');
+
+  if (role === 'assistant' && !opts.error) {
+    bubble.innerHTML = renderMarkdown(content);
+  } else {
+    bubble.textContent = content;
+  }
+
+  el.appendChild(bubble);
+
+  if (opts.time) {
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+    meta.textContent = fmtTime(opts.time);
+    el.appendChild(meta);
+  }
+
+  dom.messages.appendChild(el);
+  scrollBottom();
+  return el;
+}
+
+function appendTypingIndicator() {
+  const el = document.createElement('div');
+  el.className = 'msg assistant';
+  el.id = 'typing-indicator';
+  el.innerHTML = '<div class="msg-bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>';
+  dom.messages.appendChild(el);
+  scrollBottom();
+  return el;
+}
+
+/* =============================================================
+   DRAWER
+   ============================================================= */
+function clearDrawer() {
+  dom.drawerContent.innerHTML = '';
+  dom.drawerContent.appendChild(dom.drawerEmpty);
+  dom.drawerEmpty.style.display = 'flex';
+  state.activeToolCards = {};
+}
+
+function addThinkingCard(text) {
+  dom.drawerEmpty.style.display = 'none';
+  const card = document.createElement('div');
+  card.className = 'thinking-card';  // collapsed by default
+  card.innerHTML = `
+    <div class="thinking-card-header">
+      <span class="thinking-icon">&#x1F9E0;</span>
+      <span>Thinking</span>
+      <span style="margin-left:auto;font-size:10px;color:var(--text-muted)">&#x25BC;</span>
+    </div>
+    <div class="thinking-card-body">
+      <div class="thinking-text">${escHtml(text)}</div>
+    </div>
+  `;
+  card.querySelector('.thinking-card-header').addEventListener('click', () => card.classList.toggle('open'));
+  dom.drawerContent.appendChild(card);  // append at bottom
+}
+
+function addToolStartCard(tool, input, callId) {
+  dom.drawerEmpty.style.display = 'none';
+  const color = toolColor(tool);
+  const card = document.createElement('div');
+  card.className = 'tool-card';  // collapsed by default
+  card.dataset.callId = callId;
+  card.innerHTML = `
+    <div class="tool-card-header">
+      <span class="tool-dot ${color}"></span>
+      <span class="tool-name">${escHtml(tool)}</span>
+      <span class="tool-spinner"></span>
+    </div>
+    <div class="tool-card-body">
+      <div class="tool-section-label">Input</div>
+      <div class="tool-json">${escHtml(JSON.stringify(input, null, 2))}</div>
+    </div>
+  `;
+  card.querySelector('.tool-card-header').addEventListener('click', () => card.classList.toggle('open'));
+  dom.drawerContent.appendChild(card);  // append at bottom
+  dom.drawerContent.scrollTop = dom.drawerContent.scrollHeight;
+  state.activeToolCards[callId] = card;
+}
+
+function updateToolEndCard(tool, output, durationMs, callId) {
+  const card = state.activeToolCards[callId];
+  if (!card) return;
+  const header = card.querySelector('.tool-card-header');
+  const spinner = header.querySelector('.tool-spinner');
+  if (spinner) {
+    const dur = document.createElement('span');
+    dur.className = 'tool-duration';
+    dur.textContent = `${durationMs}ms`;
+    header.replaceChild(dur, spinner);
+  }
+  const body = card.querySelector('.tool-card-body');
+  const outSection = document.createElement('div');
+  outSection.innerHTML = `
+    <div class="tool-section-label">Output</div>
+    <div class="tool-json">${escHtml(output)}</div>
+  `;
+  body.appendChild(outSection);
+}
+
+/* =============================================================
+   SOURCE EXTRACTION & LINK HANDLING
+   ============================================================= */
+
+/**
+ * Open a URL in the system default app.
+ * In pywebview, window.open() opens the OS browser/file handler.
+ */
+function openExternalUrl(url) {
+  try {
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.open_url) {
+      window.pywebview.api.open_url(url);
+    } else {
+      window.open(url, '_blank');
+    }
+  } catch { window.open(url, '_blank'); }
+}
+
+// Global click handler to intercept all <a> clicks inside the messages area
+document.addEventListener('click', e => {
+  const a = e.target.closest('a');
+  if (!a) return;
+  const href = a.getAttribute('href');
+  if (!href) return;
+  // Only intercept http/https and local file URLs
+  if (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('file://')) {
+    e.preventDefault();
+    openExternalUrl(href);
+  }
+});
+
+/* =============================================================
+   TOKEN SPARKLINE
+   ============================================================= */
+const tokenDatapoints = [];  // {t: timestamp_ms, cumulative: N, event: 'query'|'reply'}
+
+function drawSparkline() {
+  const canvas = $('token-sparkline');
+  if (!canvas) return;
+  const pts = tokenDatapoints;
+  if (pts.length < 2) { canvas.style.display = 'none'; return; }
+  canvas.style.display = 'inline-block';
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const vals = pts.map(p => p.cumulative);
+  const minV = 0;
+  const maxV = Math.max(...vals) || 1;
+
+  // Draw filled area under the line
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  ctx.beginPath();
+  pts.forEach((p, i) => {
+    const x = (i / (pts.length - 1)) * W;
+    const y = H - ((p.cumulative - minV) / (maxV - minV)) * (H - 2) - 1;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = accent || '#5b7df8';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Fill below
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+  ctx.fillStyle = (accent || '#5b7df8') + '33';
+  ctx.fill();
+}
+
+/* =============================================================
+   TOKEN DISPLAY
+   ============================================================= */
+function updateTokenDisplay(tq, tr) {
+  if (tq !== undefined) {
+    state.sessionTokens.query += tq;
+    state.sessionTokens.reply += tr;
+    tokenDatapoints.push({
+      t: Date.now(),
+      cumulative: state.sessionTokens.query + state.sessionTokens.reply,
+    });
+    if (tokenDatapoints.length > 200) tokenDatapoints.splice(0, tokenDatapoints.length - 200);
+  }
+  const total = state.sessionTokens.query + state.sessionTokens.reply;
+  if (total === 0) {
+    dom.tokenLabel.textContent = 'Session: 0 tokens';
+    dom.tokenBar.style.width = '0%';
+    return;
+  }
+  // Show cumulative session tokens (query + reply)
+  const fmt = n => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+  dom.tokenLabel.textContent = `Session: ${fmt(total)} tokens (${fmt(state.sessionTokens.query)}\u2191 ${fmt(state.sessionTokens.reply)}\u2193)`;
+  drawSparkline();
+  // Keep the hidden bar updated for the color coding logic
+  const limit = getModelContextLimit(state.model);
+  const pct   = limit > 0 ? Math.min((total / limit) * 100, 100) : Math.min((total / 100000) * 100, 100);
+  dom.tokenBar.style.width = pct + '%';
+  dom.tokenBar.style.background =
+    pct > 80 ? 'var(--red)' : pct > 60 ? 'var(--amber)' : 'var(--accent)';
+}
+
+/* =============================================================
+   QUERY + SSE STREAM
+   ============================================================= */
+async function sendQuery() {
+  const question = dom.queryInput.value.trim();
+  if (!question || state.streaming) return;
+
+  if (!state.sessionId) await newChat();
+  if (!state.sessionId) return;
+
+  state.queryHistory.unshift(question);
+  if (state.queryHistory.length > 50) state.queryHistory.pop();
+  state.historyIndex = -1;
+
+  dom.queryInput.value = '';
+  autoResizeTextarea();
+  appendMessage('user', question, { time: new Date().toISOString() });
+
+  if (!dom.toolDrawer.classList.contains('collapsed') || state.drawerPinned) {
+    clearDrawer();
+  } else {
+    dom.toolDrawer.classList.remove('collapsed');
+    clearDrawer();
+  }
+
+  const typingEl = appendTypingIndicator();
+  state.streaming = true;
+  dom.btnSend.disabled = true;
+  dom.agentMsg.textContent = '⚙ Running…';
+
+  let assembledText = '';
+
+  try {
+    const res = await fetch(API + '/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: state.sessionId,
+        question,
+        workspace: state.workspace,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || res.statusText);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      let eventType = null;
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          eventType = line.slice(7).trim();
+        } else if (line.startsWith('data: ') && eventType) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            handleSSEEvent(eventType, data);
+            if (eventType === 'text_chunk') assembledText += data.text || '';
+          } catch { /* malformed JSON, skip */ }
+          eventType = null;
+        }
+      }
+    }
+
+  } catch (e) {
+    typingEl.remove();
+    appendMessage('assistant', `⚠ Error: ${e.message}`, { error: true, time: new Date().toISOString() });
+    dom.agentMsg.textContent = 'Error';
+    state.streaming = false;
+    dom.btnSend.disabled = false;
+    return;
+  }
+
+  // Convert the typing indicator into the final message bubble in-place
+  // (avoids a duplicate render: the indicator already has the streamed text)
+  const typingBubble = typingEl ? typingEl.querySelector('.msg-bubble') : null;
+  if (typingBubble && assembledText) {
+    typingBubble.innerHTML = renderMarkdown(assembledText);
+    // Add timestamp
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+    meta.textContent = fmtTime(new Date().toISOString());
+    typingEl.appendChild(meta);
+    // Remove the id so it's no longer the typing indicator
+    typingEl.removeAttribute('id');
+  } else if (typingEl) {
+    typingEl.remove();
+    if (assembledText) {
+      appendMessage('assistant', assembledText, { time: new Date().toISOString() });
+    }
+  }
+
+  dom.agentMsg.textContent = 'Ready';
+  state.streaming = false;
+  dom.btnSend.disabled = false;
+  loadSessions();
+}
+
+function handleSSEEvent(type, data) {
+  switch (type) {
+    case 'thinking':
+      addThinkingCard(data.text);
+      break;
+    case 'tool_start':
+      addToolStartCard(data.tool, data.input, data.call_id);
+      dom.agentMsg.textContent = `🔧 ${data.tool}`;
+      break;
+    case 'tool_end':
+      updateToolEndCard(data.tool, data.output, data.duration_ms, data.call_id);
+      break;
+    case 'text_chunk': {
+      const typing = $('typing-indicator');
+      if (typing) {
+        const bubble = typing.querySelector('.msg-bubble');
+        if (bubble) {
+          if (bubble.querySelector('.typing-dots')) bubble.innerHTML = '';
+          bubble.dataset.partial = (bubble.dataset.partial || '') + data.text;
+          bubble.innerHTML = renderMarkdown(bubble.dataset.partial);
+          scrollBottom();
+        }
+      }
+      dom.agentMsg.textContent = '✍ Writing…';
+      break;
+    }
+    case 'token_update': {
+      // Show live running totals for the current query without committing to session yet.
+      // We temporarily add the current-query tokens on top of the previous session total.
+      const prevTotal = state.sessionTokens.query + state.sessionTokens.reply;
+      const liveTotal = prevTotal + data.token_query + data.token_reply;
+      const fmt = n => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+      dom.tokenLabel.textContent = `Session: ${fmt(liveTotal)} tokens (${fmt(state.sessionTokens.query + data.token_query)}\u2191 ${fmt(state.sessionTokens.reply + data.token_reply)}\u2193)`;
+      const limit = getModelContextLimit(state.model);
+      const pct   = limit > 0 ? Math.min((liveTotal / limit) * 100, 100) : Math.min((liveTotal / 100000) * 100, 100);
+      dom.tokenBar.style.width = pct + '%';
+      dom.tokenBar.style.background =
+        pct > 80 ? 'var(--red)' : pct > 60 ? 'var(--amber)' : 'var(--accent)';
+      break;
+    }
+    case 'done':
+      updateTokenDisplay(data.token_query, data.token_reply);
+      dom.agentMsg.textContent = 'Ready';
+      break;
+    case 'error': {
+      const typingEl = $('typing-indicator');
+      if (typingEl) typingEl.remove();
+      appendMessage('assistant', `⚠ ${data.message}`, { error: true, time: new Date().toISOString() });
+      break;
+    }
+  }
+}
+
+/* =============================================================
+   INPUT EVENTS
+   ============================================================= */
+dom.btnSend.addEventListener('click', sendQuery);
+
+dom.queryInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.ctrlKey && !e.shiftKey) {
+    e.preventDefault(); sendQuery(); return;
+  }
+  if (e.key === 'Enter' && e.ctrlKey) {
+    // Insert newline
+    e.preventDefault();
+    const ta = dom.queryInput;
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    ta.value = ta.value.slice(0, start) + '\n' + ta.value.slice(end);
+    ta.selectionStart = ta.selectionEnd = start + 1;
+    autoResizeTextarea();
+    return;
+  }
+  if (e.key === 'ArrowUp' && dom.queryInput.value === '') {
+    e.preventDefault();
+    state.historyIndex = Math.min(state.historyIndex + 1, state.queryHistory.length - 1);
+    if (state.historyIndex >= 0) dom.queryInput.value = state.queryHistory[state.historyIndex];
+    autoResizeTextarea(); return;
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    state.historyIndex = Math.max(state.historyIndex - 1, -1);
+    dom.queryInput.value = state.historyIndex >= 0 ? state.queryHistory[state.historyIndex] : '';
+    autoResizeTextarea(); return;
+  }
+});
+dom.queryInput.addEventListener('input', autoResizeTextarea);
+
+/* =============================================================
+   PROVIDER / MODEL CONFIG
+   ============================================================= */
+async function loadConfig() {
+  try {
+    const cfg = await api('/config');
+    if (cfg['global.provider']) { state.provider = cfg['global.provider']; dom.providerSelect.value = state.provider; }
+    if (cfg['global.model'])    { state.model    = cfg['global.model']; }
+    if (cfg['global.theme'] === 'light') {
+      document.documentElement.classList.add('light');
+      $('icon-moon').style.display = 'none';
+      $('icon-sun').style.display  = '';
+    }
+  } catch { /* first launch */ }
+}
+
+// Provider and model change handlers are defined in the MODEL DROPDOWN section above
+
+/* =============================================================
+   TOOLBAR BUTTONS
+   ============================================================= */
+$('btn-drawer-toggle').addEventListener('click', () => dom.toolDrawer.classList.toggle('collapsed'));
+$('btn-pin-drawer').addEventListener('click', () => {
+  state.drawerPinned = !state.drawerPinned;
+  $('btn-pin-drawer').classList.toggle('pinned', state.drawerPinned);
+});
+$('btn-theme').addEventListener('click', async () => {
+  const isLight = document.documentElement.classList.toggle('light');
+  $('icon-moon').style.display = isLight ? 'none' : '';
+  $('icon-sun').style.display  = isLight ? '' : 'none';
+  await api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.theme', value: isLight ? 'light' : 'dark' }) });
+});
+$('btn-export').addEventListener('click', async () => {
+  if (!state.sessionId) { alert('No active session to export.'); return; }
+  try {
+    const data = await api(`/sessions/${state.sessionId}/messages`);
+    const lines = (data.messages || []).map(m =>
+      `## ${m.role === 'user' ? 'You' : 'Assistant'}\n\n${m.content}\n`
+    );
+    const md = lines.join('\n---\n\n');
+    const filename = `chat-${state.sessionId.slice(0,8)}.md`;
+
+    if (window.pywebview && window.pywebview.api) {
+      // Ask the user to pick a save folder
+      const folder = await window.pywebview.api.pick_folder();
+      if (!folder) return;  // user cancelled
+      // Save the file via the backend and open it
+      await api('/export-chat', {
+        method: 'POST',
+        body: JSON.stringify({ folder, filename, content: md }),
+      });
+    } else {
+      // Fallback for plain browser
+      const url = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
+  } catch (e) { alert('Export failed: ' + e.message); }
+});
+
+/* =============================================================
+   INGEST — live progress in status bar + toast
+   ============================================================= */
+let _ingestPollTimer = null;
+
+function _startIngestPoll(workspace, force) {
+  if (_ingestPollTimer) clearInterval(_ingestPollTimer);
+
+  const statusEl = $('ingest-status');
+  const toast    = $('ingest-toast');
+  const toastMsg = $('ingest-toast-msg');
+
+  // Show both indicators immediately
+  toast.classList.remove('hidden');
+  toastMsg.textContent = force
+    ? `Force re-ingesting "${workspace}"…`
+    : `Ingesting "${workspace}" (changed files)…`;
+  statusEl.className = 'running';
+  statusEl.style.display = '';
+  statusEl.innerHTML = '<span class="ingest-spinner"></span> Starting…';
+
+  _ingestPollTimer = setInterval(async () => {
+    try {
+      const data = await api('/ingest/status');
+      const ws = (data.workspaces || []).find(w => w.workspace === workspace);
+      if (!ws) return;
+
+      const { status, processed, total, indexed, skipped, failed, elapsed_s, error } = ws;
+
+      if (status === 'running') {
+        const pct   = total > 0 ? Math.round((processed / total) * 100) : 0;
+        const label = total > 0 ? `${processed} / ${total} files (${pct}%)` : 'Scanning…';
+        statusEl.innerHTML = `<span class="ingest-spinner"></span> Indexing: ${label}`;
+        toastMsg.textContent = total > 0
+          ? `${force ? 'Force ingest' : 'Ingest'}: ${processed}/${total} files (${pct}%) — ${elapsed_s}s`
+          : `${force ? 'Force ingest' : 'Ingest'}: scanning files…`;
+
+      } else if (status === 'done') {
+        clearInterval(_ingestPollTimer); _ingestPollTimer = null;
+        const summary = `${total} files → ${indexed} chunks${failed > 0 ? `, ${failed} failed` : ''} — ${elapsed_s}s`;
+        statusEl.className = 'done';
+        statusEl.innerHTML = `✓ ${summary}`;
+        toastMsg.textContent = `✓ ${force ? 'Force ingest' : 'Ingest'} complete: ${summary}`;
+        setTimeout(() => toast.classList.add('hidden'), 4000);
+        setTimeout(() => { statusEl.style.display = 'none'; statusEl.className = ''; }, 8000);
+
+      } else if (status === 'error') {
+        clearInterval(_ingestPollTimer); _ingestPollTimer = null;
+        statusEl.className = 'error';
+        statusEl.innerHTML = `✗ Error: ${error || 'unknown'}`;
+        toastMsg.textContent = `✗ Ingest failed: ${error || 'unknown'}`;
+        setTimeout(() => toast.classList.add('hidden'), 6000);
+        setTimeout(() => { statusEl.style.display = 'none'; statusEl.className = ''; }, 12000);
+      }
+    } catch (e) { console.warn('ingest poll:', e); }
+  }, 1000);
+}
+
+async function triggerIngest(force = false) {
+  if (!state.workspace) return;
+  try {
+    await api('/ingest', { method: 'POST', body: JSON.stringify({ workspace: state.workspace, force }) });
+    _startIngestPoll(state.workspace, force);
+  } catch (e) {
+    $('ingest-toast').classList.remove('hidden');
+    $('ingest-toast-msg').textContent = '✗ Ingest failed: ' + e.message;
+    setTimeout(() => $('ingest-toast').classList.add('hidden'), 4000);
+  }
+}
+
+$('btn-wipe-ingest').addEventListener('click', async () => {
+  if (!state.workspace) return;
+  const confirmed = confirm(
+    `⚠️ WIPE & RE-INGEST "${state.workspace}"
+
+This will:
+  • Delete ALL indexed documents from Meilisearch
+  • Clear all document records from the database
+  • Re-ingest every file from scratch
+
+This cannot be undone. Continue?`
+  );
+  if (!confirmed) return;
+  try {
+    const res = await api('/ingest/wipe', {
+      method: 'POST',
+      body: JSON.stringify({ workspace: state.workspace }),
+    });
+    _startIngestPoll(state.workspace, true);
+  } catch (e) {
+    $('ingest-toast').classList.remove('hidden');
+    $('ingest-toast-msg').textContent = '✗ Wipe failed: ' + e.message;
+    setTimeout(() => $('ingest-toast').classList.add('hidden'), 5000);
+  }
+});
+
+$('btn-ingest').addEventListener('click', () => triggerIngest(false));
+$('btn-force-ingest').addEventListener('click', () => {
+  if (!state.workspace) return;
+  if (!confirm(`Force re-ingest ALL files in "${state.workspace}"?\nThis re-processes every file regardless of modification time.`)) return;
+  triggerIngest(true);
+});
+
+/* =============================================================
+   WORKSPACE MODAL
+   ============================================================= */
+let pendingDirs = [];
+
+$('btn-new-workspace').addEventListener('click', () => {
+  pendingDirs = [];
+  $('ws-name-input').value = ''; $('ws-dir-input').value = ''; $('ws-dir-chips').innerHTML = '';
+  $('modal-workspace').classList.remove('hidden');
+  $('ws-name-input').focus();
+});
+$('btn-ws-cancel').addEventListener('click', () => $('modal-workspace').classList.add('hidden'));
+
+$('btn-browse-dir').addEventListener('click', async () => {
+  if (window.pywebview && window.pywebview.api) {
+    const path = await window.pywebview.api.pick_folder();
+    if (path) addDirChip(path);
+  } else {
+    const val = $('ws-dir-input').value.trim();
+    if (val) { addDirChip(val); $('ws-dir-input').value = ''; }
+  }
+});
+$('ws-dir-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const val = $('ws-dir-input').value.trim();
+    if (val) { addDirChip(val); $('ws-dir-input').value = ''; }
+  }
+});
+function addDirChip(path) {
+  if (pendingDirs.includes(path)) return;
+  pendingDirs.push(path);
+  const chip = document.createElement('div');
+  chip.className = 'dir-chip';
+  chip.innerHTML = `<span>${escHtml(path)}</span><span class="dir-chip-remove" title="Remove">×</span>`;
+  chip.querySelector('.dir-chip-remove').addEventListener('click', () => {
+    pendingDirs = pendingDirs.filter(d => d !== path); chip.remove();
+  });
+  $('ws-dir-chips').appendChild(chip);
+}
+$('btn-ws-create').addEventListener('click', async () => {
+  const name = $('ws-name-input').value.trim();
+  const typed = $('ws-dir-input').value.trim();
+  if (typed) addDirChip(typed);
+  if (!name) { alert('Please enter a workspace name.'); return; }
+  if (pendingDirs.length === 0) { alert('Please add at least one directory.'); return; }
+  try {
+    await api('/workspaces', { method: 'POST', body: JSON.stringify({ name, document_dirs: pendingDirs }) });
+    $('modal-workspace').classList.add('hidden');
+    await loadWorkspaces();
+    dom.workspaceSelect.value = name;
+    state.workspace = name;
+    await loadSessions();
+  } catch (e) { alert('Failed: ' + e.message); }
+});
+
+/* =============================================================
+   SCHEDULER MODAL
+   ============================================================= */
+$('btn-scheduler').addEventListener('click', async () => {
+  const sel = $('sched-workspace-select');
+  sel.innerHTML = state.workspaces.map(w => `<option value="${escHtml(w.name)}">${escHtml(w.name)}</option>`).join('');
+  if (state.workspace) sel.value = state.workspace;
+  // Show/hide Stop button based on whether scheduler is running
+  try {
+    const status = await api('/scheduler/status');
+    $('btn-sched-stop').style.display = status.running ? '' : 'none';
+  } catch { $('btn-sched-stop').style.display = 'none'; }
+  $('modal-scheduler').classList.remove('hidden');
+});
+$('btn-sched-cancel').addEventListener('click', () => $('modal-scheduler').classList.add('hidden'));
+$('btn-sched-stop').addEventListener('click', async () => {
+  if (!confirm('Stop the scheduler? All automatic syncs will be disabled.')) return;
+  try {
+    await api('/scheduler', { method: 'DELETE' });
+    $('modal-scheduler').classList.add('hidden');
+  } catch (e) { alert('Failed to stop scheduler: ' + e.message); }
+});
+$('btn-sched-save').addEventListener('click', async () => {
+  const workspace = $('sched-workspace-select').value;
+  const interval  = parseInt($('sched-interval-input').value, 10);
+  if (!interval || interval < 1) { alert('Please enter a valid interval.'); return; }
+  try {
+    await api('/scheduler', { method: 'POST', body: JSON.stringify({ workspace, interval_minutes: interval }) });
+    $('modal-scheduler').classList.add('hidden');
+  } catch (e) { alert('Scheduler error: ' + e.message); }
+});
+
+/* =============================================================
+   KEYBOARD SHORTCUTS
+   ============================================================= */
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === '/') { e.preventDefault(); dom.toolDrawer.classList.toggle('collapsed'); }
+  if (e.ctrlKey && e.key === 'n' && !e.shiftKey && document.activeElement !== dom.queryInput) {
+    e.preventDefault(); newChat();
+  }
+});
+
+/* =============================================================
+   SETTINGS MODAL
+   ============================================================= */
+
+// Tab switching — scoped to #modal-settings only
+document.querySelectorAll('#modal-settings .settings-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('#modal-settings .settings-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('#modal-settings .settings-pane').forEach(p => p.classList.add('hidden'));
+    tab.classList.add('active');
+    $('settings-pane-' + tab.dataset.tab).classList.remove('hidden');
+  });
+});
+
+async function openSettings() {
+  // Reset all status labels and inputs
+  ['google', 'openai', 'anthropic'].forEach(p => {
+    $('key-input-' + p).value = '';
+    setKeyStatus(p, '');
+  });
+
+  // Load existing keys (masked) to show which ones are saved
+  try {
+    const data = await api('/keys');
+    const keys = data.keys || {};
+    ['google', 'openai', 'anthropic'].forEach(provider => {
+      if (keys[provider]) {
+        setKeyStatus(provider, '\u2713 Key saved: ' + keys[provider], 'ok');
+        $('key-btn-delete-' + provider).classList.remove('hidden');
+      } else {
+        $('key-btn-delete-' + provider).classList.add('hidden');
+      }
+    });
+  } catch (e) {
+    console.warn('Could not load keys:', e);
+  }
+
+  // Load LangSmith config
+  try {
+    const ls = await api('/langsmith');
+    if (ls.configured) {
+      setKeyStatus('langsmith', '\u2713 Configured: ' + ls.api_key_masked + (ls.project ? ' / ' + ls.project : ''), 'ok');
+      $('btn-langsmith-delete').classList.remove('hidden');
+      $('langsmith-project').value = ls.project || '';
+    } else {
+      $('btn-langsmith-delete').classList.add('hidden');
+    }
+  } catch (e) {
+    console.warn('Could not load LangSmith config:', e);
+  }
+
+  $('modal-settings').classList.remove('hidden');
+}
+
+function setKeyStatus(provider, msg, type = '') {
+  const el = $('key-status-' + provider);
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'key-status' + (type ? ' ' + type : '');
+}
+
+// Wire save buttons
+document.querySelectorAll('.key-btn-save').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const provider = btn.dataset.provider;
+    const input = $('key-input-' + provider);
+    const key = input.value.trim();
+    if (!key) { setKeyStatus(provider, 'Please enter a key.', 'err'); return; }
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      await api('/keys', { method: 'POST', body: JSON.stringify({ provider, key }) });
+      input.value = '';
+      // Reload masked version to confirm
+      const data = await api('/keys');
+      const masked = (data.keys || {})[provider] || '';
+      setKeyStatus(provider, '\u2713 Saved: ' + masked, 'ok');
+      $('key-btn-delete-' + provider).classList.remove('hidden');
+    } catch (e) {
+      setKeyStatus(provider, '\u2717 ' + (e.message || 'Failed'), 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save';
+    }
+  });
+});
+
+// Wire delete buttons — assign IDs so we can target them
+document.querySelectorAll('.key-btn-delete[data-provider]').forEach(btn => {
+  const provider = btn.dataset.provider;
+  btn.id = 'key-btn-delete-' + provider;
+  btn.addEventListener('click', async () => {
+    if (!confirm(`Remove saved ${provider} API key?`)) return;
+    try {
+      await api('/keys', { method: 'DELETE', body: JSON.stringify({ provider }) });
+      setKeyStatus(provider, '');
+      btn.classList.add('hidden');
+      $('key-input-' + provider).value = '';
+    } catch (e) {
+      setKeyStatus(provider, '\u2717 ' + (e.message || 'Failed'), 'err');
+    }
+  });
+});
+
+$('btn-settings').addEventListener('click', openSettings);
+$('btn-settings-close').addEventListener('click', () => $('modal-settings').classList.add('hidden'));
+
+// LangSmith save
+$('btn-langsmith-save').addEventListener('click', async () => {
+  const apiKey = $('langsmith-api-key').value.trim();
+  const project = $('langsmith-project').value.trim() || 'local-search-agent';
+  if (!apiKey) { setKeyStatus('langsmith', 'Please enter an API key.', 'err'); return; }
+  const btn = $('btn-langsmith-save');
+  btn.disabled = true; btn.textContent = 'Saving\u2026';
+  try {
+    await api('/langsmith', { method: 'POST', body: JSON.stringify({ api_key: apiKey, project }) });
+    $('langsmith-api-key').value = '';
+    const ls = await api('/langsmith');
+    setKeyStatus('langsmith', '\u2713 Configured: ' + ls.api_key_masked + ' / ' + ls.project, 'ok');
+    $('btn-langsmith-delete').classList.remove('hidden');
+  } catch (e) {
+    setKeyStatus('langsmith', '\u2717 ' + (e.message || 'Failed'), 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+});
+
+// LangSmith delete
+$('btn-langsmith-delete').addEventListener('click', async () => {
+  if (!confirm('Remove LangSmith tracing config?')) return;
+  try {
+    await api('/langsmith', { method: 'DELETE' });
+    setKeyStatus('langsmith', '');
+    $('btn-langsmith-delete').classList.add('hidden');
+    $('langsmith-api-key').value = '';
+    $('langsmith-project').value = '';
+  } catch (e) {
+    setKeyStatus('langsmith', '\u2717 ' + (e.message || 'Failed'), 'err');
+  }
+});
+
+// Close on overlay click
+$('modal-settings').addEventListener('click', e => {
+  if (e.target === $('modal-settings')) $('modal-settings').classList.add('hidden');
+});
+
+/* =============================================================
+   DOCS BUTTON
+   ============================================================= */
+$('btn-docs').addEventListener('click', () => {
+  const docsUrl = `http://127.0.0.1:{{ file_server_port }}/help/index.html`;
+  openExternalUrl(docsUrl);
+});
+
+/* =============================================================
+   MODEL DROPDOWN — load and repopulate on provider change
+   ============================================================= */
+let _allModels = {};
+
+async function loadModels() {
+  try {
+    const data = await api('/models');
+    _allModels = data.models || {};
+    repopulateModelDropdown(state.provider);
+  } catch (e) {
+    console.warn('Could not load models:', e);
+  }
+}
+
+function repopulateModelDropdown(provider) {
+  const sel = dom.modelInput;
+  const models = _allModels[provider] || [];
+  const current = state.model;
+  sel.innerHTML = models.map(m =>
+    `<option value="${escHtml(m)}"${m === current ? ' selected' : ''}>${escHtml(m)}</option>`
+  ).join('');
+  if (models.length === 0) {
+    sel.innerHTML = '<option value="" disabled selected>No models \u2014 add via Config</option>';
+  } else if (!models.includes(current)) {
+    // Current model doesn\'t exist for this provider — switch to first available
+    // and persist so the backend config stays in sync
+    state.model = models[0];
+    sel.value = models[0];
+    api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.model', value: models[0] }) })
+      .catch(e => console.warn('Could not persist model change:', e));
+  }
+}
+
+// Override the provider change handler to also repopulate models
+dom.providerSelect.addEventListener('change', async () => {
+  state.provider = dom.providerSelect.value;
+  repopulateModelDropdown(state.provider);
+  await api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.provider', value: state.provider }) });
+});
+
+// Override model change to work with select
+dom.modelInput.addEventListener('change', async () => {
+  state.model = dom.modelInput.value;
+  if (state.model) {
+    await api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.model', value: state.model }) });
+    updateTokenDisplay();
+  }
+});
+
+/* =============================================================
+   CONFIG MODAL — tab switching
+   ============================================================= */
+document.querySelectorAll('#modal-config .settings-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('#modal-config .settings-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('#modal-config .settings-pane').forEach(p => p.classList.add('hidden'));
+    tab.classList.add('active');
+    $('settings-pane-' + tab.dataset.tab).classList.remove('hidden');
+  });
+});
+
+async function openConfig() {
+  // Load semantic settings
+  try {
+    const s = await api('/settings/semantic');
+    $('toggle-enable-semantic').checked        = !!s.enable_semantic;
+    $('toggle-enable-query-expansion').checked = !!s.enable_query_expansion;
+    $('toggle-enable-link-graph').checked      = !!s.enable_link_graph;
+  } catch (e) { console.warn('Could not load semantic settings:', e); }
+
+  // Load model list
+  await loadModels();
+  renderModelList(_allModels);
+
+  $('modal-config').classList.remove('hidden');
+}
+
+$('btn-config').addEventListener('click', openConfig);
+$('btn-config-close').addEventListener('click', () => $('modal-config').classList.add('hidden'));
+$('modal-config').addEventListener('click', e => {
+  if (e.target === $('modal-config')) $('modal-config').classList.add('hidden');
+});
+
+/* Semantic save */
+$('btn-semantic-save').addEventListener('click', async () => {
+  const btn = $('btn-semantic-save');
+  btn.disabled = true; btn.textContent = 'Saving\u2026';
+  try {
+    await api('/settings/semantic', {
+      method: 'POST',
+      body: JSON.stringify({
+        enable_semantic:        $('toggle-enable-semantic').checked,
+        enable_query_expansion: $('toggle-enable-query-expansion').checked,
+        enable_link_graph:      $('toggle-enable-link-graph').checked,
+      }),
+    });
+    $('semantic-status').textContent = '\u2713 Saved';
+    $('semantic-status').className = 'key-status ok';
+    setTimeout(() => { $('semantic-status').textContent = ''; $('semantic-status').className = 'key-status'; }, 2500);
+  } catch (e) {
+    $('semantic-status').textContent = '\u2717 ' + (e.message || 'Failed');
+    $('semantic-status').className = 'key-status err';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+});
+
+/* =============================================================
+   MODEL MANAGER
+   ============================================================= */
+function renderModelList(models) {
+  const container = $('model-list-container');
+  container.innerHTML = '';
+  const providers = ['google', 'openai', 'anthropic', 'ollama'];
+  providers.forEach(provider => {
+    const list = models[provider] || [];
+    const group = document.createElement('div');
+    group.className = 'model-provider-group';
+    group.innerHTML = `<div class="model-provider-header">${provider}</div>`;
+    if (list.length === 0) {
+      group.innerHTML += '<div class="model-item" style="color:var(--text-muted)">No models added</div>';
+    } else {
+      list.forEach(model => {
+        const item = document.createElement('div');
+        item.className = 'model-item';
+        item.innerHTML = `
+          <span class="model-item-name">${escHtml(model)}</span>
+          <button class="model-item-delete" data-provider="${escHtml(provider)}" data-model="${escHtml(model)}">Remove</button>
+        `;
+        group.appendChild(item);
+      });
+    }
+    container.appendChild(group);
+  });
+
+  // Wire remove buttons
+  container.querySelectorAll('.model-item-delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const provider = btn.dataset.provider;
+      const model = btn.dataset.model;
+      if (!confirm(`Remove "${model}" from ${provider}?`)) return;
+      try {
+        const data = await api('/models', {
+          method: 'DELETE',
+          body: JSON.stringify({ provider, model_name: model }),
+        });
+        _allModels = data.models || _allModels;
+        renderModelList(_allModels);
+        repopulateModelDropdown(state.provider);
+      } catch (e) {
+        $('model-mgr-status').textContent = '\u2717 ' + (e.message || 'Failed');
+        $('model-mgr-status').className = 'key-status err';
+      }
+    });
+  });
+}
+
+$('btn-model-add').addEventListener('click', async () => {
+  const provider = $('model-mgr-provider').value;
+  const name = $('model-mgr-name').value.trim();
+  if (!name) { $('model-mgr-status').textContent = 'Enter a model name.'; $('model-mgr-status').className = 'key-status err'; return; }
+  try {
+    const data = await api('/models', {
+      method: 'POST',
+      body: JSON.stringify({ provider, model_name: name }),
+    });
+    _allModels = data.models || _allModels;
+    $('model-mgr-name').value = '';
+    renderModelList(_allModels);
+    repopulateModelDropdown(state.provider);
+    $('model-mgr-status').textContent = '\u2713 Added';
+    $('model-mgr-status').className = 'key-status ok';
+    setTimeout(() => { $('model-mgr-status').textContent = ''; $('model-mgr-status').className = 'key-status'; }, 2000);
+  } catch (e) {
+    $('model-mgr-status').textContent = '\u2717 ' + (e.message || 'Failed');
+    $('model-mgr-status').className = 'key-status err';
+  }
+});
+
+/* =============================================================
+   BOOT
+   ============================================================= */
+// Force layout reflow on window resize (pywebview doesn't always
+// reflow 100vh correctly on Windows when the user resizes manually)
+window.addEventListener('resize', () => {
+  const app = document.getElementById('app');
+  if (app) {
+    app.style.height = window.innerHeight + 'px';
+  }
+});
+// Also set it once at startup for safety
+document.addEventListener('DOMContentLoaded', () => {
+  const app = document.getElementById('app');
+  if (app) app.style.height = window.innerHeight + 'px';
+});
+
+async function boot() {
+  console.log('🚀 Booting Local Search Agent UI...');
+  await loadConfig();
+  console.log('✓ Config loaded');
+  await loadModels();
+  console.log('✓ Models loaded');
+  dom.providerSelect.value = state.provider;
+  await loadWorkspaces();
+  console.log('✓ Workspaces loaded:', state.workspaces.length, 'workspaces');
+  if (state.workspace) {
+    console.log('📂 Active workspace:', state.workspace);
+    await loadSessions();
+    if (state.sessions.length > 0) {
+      await loadSession(state.sessions[0].session_id);
+    } else {
+      await newChat();
+    }
+  } else {
+    console.warn('⚠️  No workspace selected. Create one to start.');
+  }
+  updateTokenDisplay();
+  console.log('🔍 Starting health checks...');
+  pollHealth();
+  setInterval(pollHealth, 15000);
+  console.log('✅ Boot complete');
+}
+
+boot().catch(e => console.error('Boot error:', e));
+</script>

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Local Agent Search Engine</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+{% include '_styles.html' %}
+</head>
+<body>
+<div id="app">
+  {% include '_topbar.html' %}
+  <div id="main">
+    {% include '_sidebar.html' %}
+    {% include '_drawer.html' %}
+    {% include '_chat.html' %}
+  </div>
+  {% include '_statusbar.html' %}
+</div>
+{% include '_modals.html' %}
+{% include '_script.html' %}
+</body>
+</html>

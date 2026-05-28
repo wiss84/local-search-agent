@@ -1,0 +1,55 @@
+# Personal / scratch files
+dumps/
+LASE.bat
+questions.md
+progress_log.md
+logs.md
+cli_commands.md
+introduction_post.md
+linkedin_post.md
+future_features.md
+LOCAL_SEARCH_AGENT_PLAN.md
+PROJECT_SUMMARY.md
+issues.md
+rate_limit_state.json
+cmdgit.md
+test_logs.md
+ruff_logs.md
+.coverage
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets
+.env
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+tests/local_search_agent.db
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

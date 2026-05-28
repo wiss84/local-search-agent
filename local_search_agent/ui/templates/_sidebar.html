@@ -1,0 +1,73 @@
+<!-- ═══════════════════════════════════════════════════════
+     LEFT PANEL  —  controls + session history
+     ═══════════════════════════════════════════════════════ -->
+<aside id="left-panel">
+
+  <!-- ── Workspace ── -->
+  <div class="lp-section">
+    <div class="lp-label">Workspace</div>
+    <select id="workspace-select" class="lp-select"></select>
+    <button id="btn-new-workspace" class="lp-btn-ghost">+ New Workspace</button>
+  </div>
+
+  <div class="lp-divider"></div>
+
+  <!-- ── Provider & Model ── -->
+  <div class="lp-section">
+    <div class="lp-label">Provider</div>
+    <select id="provider-select" class="lp-select">
+      <option value="google">Google</option>
+      <option value="openai">OpenAI</option>
+      <option value="anthropic">Anthropic</option>
+      <option value="ollama">Ollama</option>
+    </select>
+    <div class="lp-label" style="margin-top:8px">Model</div>
+    <select id="model-input" class="lp-select"></select>
+  </div>
+
+  <div class="lp-divider"></div>
+
+  <!-- ── Ingestion ── -->
+  <div class="lp-section">
+    <div class="lp-label">Ingestion</div>
+    <button class="lp-btn" id="btn-ingest" title="Re-ingest changed files only">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="1,8 1,14 15,14 15,8"/><polyline points="5,4 8,1 11,4"/><line x1="8" y1="1" x2="8" y2="10"/></svg>
+      Ingest
+    </button>
+    <button class="lp-btn lp-btn-warning" id="btn-force-ingest" title="Force re-ingest all files (ignores modification time)">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 2.5a6.5 6.5 0 1 1-9.19.35"/><polyline points="1,1 1,5 5,5"/></svg>
+      Force Re-ingest
+    </button>
+    <button class="lp-btn lp-btn-danger" id="btn-wipe-ingest" title="Wipe index and re-ingest from scratch">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="2,4 14,4"/><path d="M5,4V2h6v2"/><path d="M3,4l1,10h8l1-10"/></svg>
+      Wipe &amp; Re-ingest
+    </button>
+  </div>
+
+  <div class="lp-divider"></div>
+
+  <!-- ── Tools ── -->
+  <div class="lp-section">
+    <div class="lp-label">Tools</div>
+    <button class="lp-btn" id="btn-scheduler" title="Configure ingestion scheduler">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><polyline points="8,4 8,8 11,10"/></svg>
+      Scheduler
+    </button>
+    <button class="lp-btn lp-btn-accent" id="btn-export" title="Export conversation as Markdown">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V6z"/><polyline points="9,1 9,6 14,6"/></svg>
+      Export Chat
+    </button>
+  </div>
+
+  <div class="lp-divider"></div>
+
+  <!-- ── Session History ── -->
+  <div class="lp-section lp-section-sessions">
+    <div class="lp-sessions-header">
+      <span class="lp-label" style="margin:0">History</span>
+      <button id="btn-new-chat" class="lp-btn-ghost lp-btn-xs">+ New</button>
+    </div>
+    <div id="session-list"></div>
+  </div>
+
+</aside>

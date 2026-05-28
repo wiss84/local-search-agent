@@ -1,0 +1,202 @@
+# Local Search Agent
+
+**Give your AI agent a search engine for your local files.**
+
+---
+
+## What is this?
+
+Local Search Agent is a Python framework that gives your AI agent a search engine for your local files and lets it search, fetch, and reason over your local documents — the same way a researcher searches the web, but entirely on your machine.
+
+Point it at a folder. Ask a question. The agent searches your documents, reads the relevant ones, and gives you an answer with citations — no cloud upload, no API calls to external search services, no embeddings, no vector stores.
+
+```
+"What was the AWS spend in Q3?"  →  agent searches index  →  fetches relevant docs  →  answers with sources
+```
+
+---
+
+## Why not RAG?
+
+Traditional RAG (Retrieval-Augmented Generation) has a fundamental problem: it converts your documents into embeddings and stores them in a vector database. That means:
+
+- **Stale indexes** — embeddings go out of date silently. You never know if the agent is reading your latest documents or a six-month-old snapshot
+- **Black-box retrieval** — you can't see why a document was retrieved or not. Debugging poor answers is guesswork
+- **Chunking anxiety** — split too small and you lose context. Split too large and retrieval quality degrades. There's no right answer
+- **Infrastructure overhead** — a vector database is another service to run, maintain, and pay for
+- **Semantic drift** — embeddings are sensitive to how questions are phrased. A question about "cloud expenditure" may never match a document that says "AWS spend"
+
+Local Search Agent takes a different approach: **BM25 keyword search via Meilisearch, structured metadata, and a LangGraph agent loop with tools**. The agent searches your document index the same way a developer searches Stack Overflow — with real queries, real results, and full transparency into what was retrieved and why.
+
+The result is deterministic, auditable, and fast. You can see exactly what the agent fetched for every answer.
+
+---
+
+## How it works
+
+```
+1. INGEST     Your documents → parsed, cleaned, chunked, indexed into Meilisearch
+2. SERVE      FastAPI file server makes documents available to the agent via HTTP
+3. SEARCH     LangGraph agent loop: search_local_index → fetch_local_url → reason
+4. ANSWER     Agent returns an answer with inline source citations
+```
+
+Everything runs locally. Meilisearch downloads automatically on first use, no manual setup.
+
+---
+
+## Screenshots
+
+### Desktop UI
+![Local Search Agent UI](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/assets/local_search_agent_ui.webp)
+
+### CLI Interactive Mode
+![Local Search Agent CLI](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/assets/local_search_agent_cli.webp)
+
+### Python API
+![Local Search Agent Python API](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/assets/local_search_agent_api.webp)
+
+---
+
+## Install
+
+```bash
+pip install local-search-agent
+```
+
+## Set your API key
+
+```bash
+# Google AI Studio (free tier — recommended) or paid from openai or anthropic
+local-search config set-key --provider google --key YOUR_KEY
+
+# Or use Ollama for a fully local, zero-cost setup (no key needed)
+# Install from https://ollama.com 
+# Download any model that support function calling and system instructions: 
+`ollama pull gemma4:e2b` (7.2GB) or `ollama pull gemma4:e4b` (9.6GB)
+```
+
+---
+
+## Quick Start
+
+### Desktop UI
+
+```bash
+local-search ui
+```
+
+The desktop window opens. Create a workspace, point it at a folder, ingest, and start asking questions.
+
+### CLI
+
+```bash
+# Create a workspace and ingest documents
+local-search workspace create finance "C:\my_docs"
+local-search ingest --workspace finance --dirs "C:\my_docs"
+
+# Start the file server (keep this running)
+local-search serve --workspace finance
+
+# Ask a question
+local-search query "What was the AWS spend in Q3?" --workspace finance --provider google
+
+# Use interactive mode
+local-search --workspace finance --provider google
+```
+
+### Python API
+
+```python
+from local_search_agent import SearchAgentFramework, SearchAgentConfig
+
+config = SearchAgentConfig(
+    document_dirs=["C:/my_docs"],
+    workspace_name="finance",
+    provider="google",
+)
+
+framework = SearchAgentFramework(config)
+framework.ingest_and_index()
+framework.start_file_server()
+
+response = framework.query("What was the AWS spend in Q3?")
+print(response["answer"])
+```
+
+---
+
+## Supported File Types
+
+| Format | Extension |
+|--------|-----------|
+| PDF | `.pdf` |
+| Word | `.docx` |
+| Excel | `.xlsx` |
+| PowerPoint | `.pptx` |
+| HTML | `.html`, `.htm` |
+| Plain text | `.txt`, `.md` |
+| CSV | `.csv` |
+| JSON | `.json` |
+| XML | `.xml` |
+| Email | `.eml` |
+
+---
+
+## Key Features
+
+- **One command install** — `pip install local-search-agent`. Meilisearch downloads automatically
+- **No embeddings, no vector stores** — BM25 search with structured metadata. Fast, deterministic, auditable
+- **Native desktop UI** — pywebview window with live streaming agent responses, workspace management, and chat history
+- **Multi-provider LLM** — Google, Ollama (local), OpenAI, Anthropic
+- **Multi-workspace** — isolate document collections by department, project, channel, or topic. Each workspace is its own search index
+- **Incremental sync** — background scheduler re-indexes only changed files. A 10,000-document corpus with 50 changes re-indexes only the 50
+- **Full CLI parity** — everything you can do in the UI you can do from the terminal
+- **Python API** — embed the framework directly in your own application
+- **Cross-platform** — Windows, macOS, Linux
+
+---
+
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [Getting Started](docs/getting-started.md) | First steps, quick start for UI, CLI, and Python API |
+| [Installation](docs/installation.md) | Full install guide, API keys, Ollama setup, platform notes |
+| [Architecture](docs/architecture.md) | Full architrecture, design guide |
+| [CLI Reference](docs/cli-reference.md) | All commands and flags |
+| [Python API Reference](docs/api-reference.md) | Full API documentation |
+| [Configuration](docs/configuration.md) | All config options and patterns |
+| [Ingestion](docs/ingestion.md) | How ingestion works, supported formats, chunking, scheduler |
+| [Multi-Workspace](docs/multi-workspace.md) | Managing multiple document collections |
+| [Semantic Search](docs/semantic-search.md) | Experimental: concept extraction, query expansion, link graph |
+| [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
+
+---
+
+## Contributing
+
+Contributions are welcome. Clone the repo and install in editable mode with dev dependencies:
+
+```bash
+git clone https://github.com/wiss84/local-search-agent
+cd local-search-agent
+pip install -e ".[dev]"
+```
+
+Run tests before submitting a PR:
+
+```bash
+pytest tests/
+ruff check .
+```
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE) for details.
+
+---
+
+Built by [Wissam Metawee](https://github.com/wiss84)

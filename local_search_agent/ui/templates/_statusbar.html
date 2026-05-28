@@ -1,0 +1,14 @@
+<!-- ═══════════════════════════════════════════════════════
+     STATUS BAR
+     ═══════════════════════════════════════════════════════ -->
+<footer id="statusbar">
+  <span><span class="status-dot unknown" id="dot-server"></span>Server</span>
+  <span><span class="status-dot unknown" id="dot-meili"></span>Meilisearch</span>
+  <span id="status-agent-msg" style="color:var(--text-muted)">Ready</span>
+  <span id="ingest-status" style="display:none"></span>
+  <div id="token-tracker" title="Cumulative tokens used this session">
+    <span id="token-label">Session: 0 tokens</span>
+    <canvas id="token-sparkline" width="80" height="18" style="display:none"></canvas>
+    <div id="token-bar-wrap" style="display:none"><div id="token-bar"></div></div>
+  </div>
+</footer>

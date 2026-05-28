@@ -59,6 +59,13 @@ Everything runs locally. Meilisearch downloads automatically on first use, no ma
 
 ---
 
+## Video Demos
+
+- **Native UI** — Watch the [UI design and configuration video demo](https://youtu.be/J-POiSDbArs)
+- **CLI AGENT** — Watch the [Terminal document querying video demo](https://youtu.be/ZIiN4NG5g3U)
+
+---
+
 ## Install
 
 ```bash

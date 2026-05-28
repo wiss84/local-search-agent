@@ -162,16 +162,16 @@ print(response["answer"])
 
 | Guide | Description |
 |-------|-------------|
-| [Getting Started](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/getting-started.md) | First steps, quick start for UI, CLI, and Python API |
-| [Installation](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/installation.md) | Full install guide, API keys, Ollama setup, platform notes |
-| [Architecture](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/architecture.md) | Full architrecture, design guide |
-| [CLI Reference](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/cli-reference.md) | All commands and flags |
-| [Python API Reference](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/api-reference.md) | Full API documentation |
-| [Configuration](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/configuration.md) | All config options and patterns |
-| [Ingestion](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/ingestion.md) | How ingestion works, supported formats, chunking, scheduler |
-| [Multi-Workspace](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/multi-workspace.md) | Managing multiple document collections |
-| [Semantic Search](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/semantic-search.md) | Experimental: concept extraction, query expansion, link graph |
-| [Troubleshooting](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/troubleshooting.md) | Common issues and fixes |
+| [Getting Started](https://raw.githubusercontent.com/wiss84/local-search-agent/blob/main/docs/getting-started.md) | First steps, quick start for UI, CLI, and Python API |
+| [Installation](https://raw.githubusercontent.com/wiss84/local-search-agent/blob/main/docs/installation.md) | Full install guide, API keys, Ollama setup, platform notes |
+| [Architecture](https://raw.githubusercontent.com/wiss84/local-search-agent/blob/main/docs/architecture.md) | Full architrecture, design guide |
+| [CLI Reference](https://raw.githubusercontent.com/wiss84/local-search-agent/blob/main/docs/cli-reference.md) | All commands and flags |
+| [Python API Reference](https://raw.githubusercontent.com/wiss84/local-search-agent/blob/main/docs/api-reference.md) | Full API documentation |
+| [Configuration](https://raw.githubusercontent.com/wiss84/local-search-agent/blob/main/docs/configuration.md) | All config options and patterns |
+| [Ingestion](https://raw.githubusercontent.com/wiss84/local-search-agent/blob/main/docs/ingestion.md) | How ingestion works, supported formats, chunking, scheduler |
+| [Multi-Workspace](https://raw.githubusercontent.com/wiss84/local-search-agent/blob/main/docs/multi-workspace.md) | Managing multiple document collections |
+| [Semantic Search](https://raw.githubusercontent.com/wiss84/local-search-agent/blob/main/docs/semantic-search.md) | Experimental: concept extraction, query expansion, link graph |
+| [Troubleshooting](https://raw.githubusercontent.com/wiss84/local-search-agent/blob/main/docs/troubleshooting.md) | Common issues and fixes |
 
 ---
 
@@ -196,7 +196,7 @@ ruff check .
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](https://github.com/wiss84/local-search-agent/blob/main/LICENSE) for details.
 
 ---
 

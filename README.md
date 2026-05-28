@@ -162,16 +162,16 @@ print(response["answer"])
 
 | Guide | Description |
 |-------|-------------|
-| [Getting Started](docs/getting-started.md) | First steps, quick start for UI, CLI, and Python API |
-| [Installation](docs/installation.md) | Full install guide, API keys, Ollama setup, platform notes |
-| [Architecture](docs/architecture.md) | Full architrecture, design guide |
-| [CLI Reference](docs/cli-reference.md) | All commands and flags |
-| [Python API Reference](docs/api-reference.md) | Full API documentation |
-| [Configuration](docs/configuration.md) | All config options and patterns |
-| [Ingestion](docs/ingestion.md) | How ingestion works, supported formats, chunking, scheduler |
-| [Multi-Workspace](docs/multi-workspace.md) | Managing multiple document collections |
-| [Semantic Search](docs/semantic-search.md) | Experimental: concept extraction, query expansion, link graph |
-| [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
+| [Getting Started](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/getting-started.md) | First steps, quick start for UI, CLI, and Python API |
+| [Installation](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/installation.md) | Full install guide, API keys, Ollama setup, platform notes |
+| [Architecture](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/architecture.md) | Full architrecture, design guide |
+| [CLI Reference](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/cli-reference.md) | All commands and flags |
+| [Python API Reference](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/api-reference.md) | Full API documentation |
+| [Configuration](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/configuration.md) | All config options and patterns |
+| [Ingestion](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/ingestion.md) | How ingestion works, supported formats, chunking, scheduler |
+| [Multi-Workspace](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/multi-workspace.md) | Managing multiple document collections |
+| [Semantic Search](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/semantic-search.md) | Experimental: concept extraction, query expansion, link graph |
+| [Troubleshooting](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/troubleshooting.md) | Common issues and fixes |
 
 ---
 
@@ -180,7 +180,7 @@ print(response["answer"])
 Contributions are welcome. Clone the repo and install in editable mode with dev dependencies:
 
 ```bash
-git clone https://github.com/wiss84/local-search-agent
+git clone https://github.com/wiss84/local-search-agent.git
 cd local-search-agent
 pip install -e ".[dev]"
 ```

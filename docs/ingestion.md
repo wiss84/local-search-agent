@@ -89,7 +89,7 @@ Long documents are split into overlapping chunks so the agent can retrieve focus
 
 ### Table documents
 
-If more than 60% of non-empty lines start with `|` (Markdown table rows), the document uses row-based chunking: `TABLE_ROWS_PER_CHUNK` rows per chunk, with the header row prepended to every chunk. No overlap — rows are structurally independent.
+If more than 50% of non-empty lines start with `|` (Markdown table rows), the document uses row-based chunking: `TABLE_ROWS_PER_CHUNK` rows per chunk, with the header row prepended to every chunk. No overlap — rows are structurally independent.
 
 ### All other documents
 
@@ -107,12 +107,12 @@ These live in `local_search_agent/core/constants.py` and can be adjusted:
 
 | Constant | Default | Description |
 |----------|---------|-------------|
-| `CHUNK_MIN_CHARS` | `2000` | Documents shorter than this are not chunked |
-| `CHUNK_TARGET_CHARS` | `1500` | Target chunk size |
-| `CHUNK_MAX_CHARS` | `3000` | Hard maximum before a forced split |
-| `CHUNK_OVERLAP_CHARS` | `200` | Characters of overlap between adjacent chunks |
-| `TABLE_ROWS_PER_CHUNK` | `50` | Rows per chunk for table documents |
-| `TABLE_LINE_RATIO` | `0.6` | Fraction of `\|` lines to classify as table document |
+| `CHUNK_MIN_CHARS` | `1000` | Documents shorter than this are not chunked |
+| `CHUNK_TARGET_CHARS` | `8000` | Target chunk size |
+| `CHUNK_MAX_CHARS` | `20000` | Hard maximum before a forced split |
+| `CHUNK_OVERLAP_CHARS` | `500` | Characters of overlap between adjacent chunks |
+| `TABLE_ROWS_PER_CHUNK` | `100` | Rows per chunk for table documents |
+| `TABLE_LINE_RATIO` | `0.5` | Fraction of `\|` lines to classify as table document |
 
 ---
 

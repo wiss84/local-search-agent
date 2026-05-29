@@ -251,7 +251,7 @@ node = DocumentNode.from_file(
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `doc_id` | `str` | `sha256(abs_path)[:16]` — stable, URL-safe ID |
+| `doc_id` | `str` | Stable unique ID. For unchunked documents: `sha256(abs_path)[:16]`. For chunks: `sha256(abs_path:chunk:N)[:16]`. Stable across re-ingests as long as the file path and chunk index don't change. |
 | `title` | `str` | Filename without extension |
 | `text` | `str` | Cleaned Markdown text |
 | `file_type` | `str` | Extension without dot: `pdf`, `docx`, etc. |

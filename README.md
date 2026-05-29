@@ -94,7 +94,13 @@ local-search config set-key --provider google --key YOUR_KEY
 local-search ui
 ```
 
-The desktop window opens. Create a workspace, point it at a folder, ingest, and start asking questions.
+The desktop UI open:
+1. Create a workspace, name it, point it at a directory of files.
+2. Ingest (parse, clean, chunk). 
+3. Get a free google api key from ai-studio. 
+4. Set your api key at the top bar's right corner, or add a paid key for anthropic\openai .
+Note: For paid models or ollama, you will need to set model name via the config button at the top  bar's right corner.
+5. Start asking questions.
 
 ### CLI
 
@@ -195,8 +201,9 @@ pip install -e ".[dev]"
 Run tests before submitting a PR:
 
 ```bash
-pytest tests/
+pytest tests/ -v --cov=local_search_agent --cov-report=term-missing
 ruff check .
+ruff format .
 ```
 
 ---

@@ -174,6 +174,26 @@ class SearchAgentFramework:
     # Phase 3: Agent Query
     # ------------------------------------------------------------------
 
+    def _resolve_document_dirs(self, workspace: Optional[str] = None) -> None:
+        """
+        Populate config.document_dirs from the workspace DB when it is empty.
+
+        This ensures the system prompt always shows the correct document paths
+        regardless of how the framework was constructed (CLI, Python API, or UI).
+        When document_dirs was passed explicitly it is left untouched.
+        """
+        if self.config.document_dirs:
+            return
+        name = workspace or self.config.workspace_name
+        ws = self._workspace_manager.get_workspace(name)
+        if ws and ws.get("document_dir"):
+            self.config.document_dirs = [ws["document_dir"]]
+            logger.debug(
+                "Resolved document_dirs from workspace DB: %r → %r",
+                name,
+                self.config.document_dirs,
+            )
+
     def query(
         self,
         question: str,
@@ -183,6 +203,7 @@ class SearchAgentFramework:
         """Ask the agent a question against the indexed documents."""
         from local_search_agent.agent.agent import LocalSearchAgent
 
+        self._resolve_document_dirs(workspace)
         agent = LocalSearchAgent(
             config=self.config,
             meili_client=self._get_meili_client(),

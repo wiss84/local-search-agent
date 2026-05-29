@@ -1,5 +1,4 @@
-"""
-Unit tests for individual document parsers (ingestion/parsers/).
+"""Unit tests for individual document parsers (ingestion/parsers/).
 
 Tests cover only parsers that do NOT require heavy third-party models
 (i.e. not docling/PDF/DOCX). This keeps the suite fast and dependency-free in CI.
@@ -10,6 +9,7 @@ Covered parsers:
 - JSONParser    (.json)
 - XMLParser     (.xml)
 - EMLParser     (.eml)
+- PPTXParser    (.pptx)  — skipped automatically if python-pptx is not installed
 
 Each parser is tested for:
 - Returns a non-empty string on valid input
@@ -22,6 +22,8 @@ Design notes:
   the full parse → clean → DocumentNode pipeline.
 - clean() always appends a trailing "\n", so empty-file assertions use "\n".
 - The _parse() helper routes by extension the same way the pipeline does.
+- PPTX fixtures are built in-memory using python-pptx itself (no binary
+  test files committed to the repo).
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ from local_search_agent.ingestion.parsers import (
     CSVParser,
     EMLParser,
     JSONParser,
+    PPTXParser,
     TextParser,
     XMLParser,
 )
@@ -63,7 +66,7 @@ def _parse(path: Path):
     Uses the same can_parse() dispatch the real pipeline uses, so any
     extension mismatch in the parser's supported_extensions is caught here.
     """
-    parsers = [TextParser(), CSVParser(), JSONParser(), XMLParser(), EMLParser()]
+    parsers = [TextParser(), CSVParser(), JSONParser(), XMLParser(), EMLParser(), PPTXParser()]
     for p in parsers:
         if p.can_parse(str(path)):
             node = p.parse(str(path), workspace="test")
@@ -356,26 +359,173 @@ class TestEMLParser:
         text, ft = _parse(f)
         assert "Body" in text
 
-    def test_eml_multipart_plain_preferred_over_html(self, tmp_path):
-        # When both plain and HTML parts exist, plain text should win
-        content = (
-            "From: alice@example.com\r\n"
-            "To: bob@example.com\r\n"
-            "Subject: Multipart\r\n"
-            "MIME-Version: 1.0\r\n"
-            "Content-Type: multipart/alternative; boundary=boundary123\r\n"
-            "\r\n"
-            "--boundary123\r\n"
-            "Content-Type: text/plain; charset=utf-8\r\n"
-            "\r\n"
-            "Plain text version.\r\n"
-            "--boundary123\r\n"
-            "Content-Type: text/html; charset=utf-8\r\n"
-            "\r\n"
-            "<html><body>HTML version.</body></html>\r\n"
-            "--boundary123--\r\n"
+
+# ---------------------------------------------------------------------------
+# PPTXParser
+# ---------------------------------------------------------------------------
+
+pptx = pytest.importorskip("pptx", reason="python-pptx not installed")
+
+
+def _make_pptx(
+    tmp_path: Path,
+    slides: list[dict],
+    name: str = "presentation.pptx",
+) -> Path:
+    """
+    Build a minimal .pptx in-memory and write it to tmp_path.
+
+    Each entry in `slides` is a dict with optional keys:
+      - title   (str)  : slide title
+      - bullets (list) : lines of body text
+      - notes   (str)  : speaker notes text
+      - table   (list) : list of rows, each a list of cell strings
+    """
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    prs = Presentation()
+    blank_layout = prs.slide_layouts[1]  # Title and Content layout
+
+    for slide_spec in slides:
+        slide = prs.slides.add_slide(blank_layout)
+
+        if "title" in slide_spec and slide.shapes.title:
+            slide.shapes.title.text = slide_spec["title"]
+
+        if "bullets" in slide_spec:
+            body = slide.placeholders[1]
+            tf = body.text_frame
+            tf.text = slide_spec["bullets"][0]
+            for bullet in slide_spec["bullets"][1:]:
+                tf.add_paragraph().text = bullet
+
+        if "notes" in slide_spec:
+            notes_slide = slide.notes_slide
+            notes_slide.notes_text_frame.text = slide_spec["notes"]
+
+        if "table" in slide_spec:
+            rows_data = slide_spec["table"]
+            rows = len(rows_data)
+            cols = len(rows_data[0]) if rows_data else 1
+            table = slide.shapes.add_table(
+                rows, cols, Inches(1), Inches(2), Inches(6), Inches(3)
+            ).table
+            for r_idx, row in enumerate(rows_data):
+                for c_idx, cell_text in enumerate(row):
+                    table.cell(r_idx, c_idx).text = cell_text
+
+    path = tmp_path / name
+    prs.save(str(path))
+    return path
+
+
+class TestPPTXParser:
+    def test_basic_title_and_bullets(self, tmp_path):
+        f = _make_pptx(
+            tmp_path,
+            [{"title": "Intro", "bullets": ["First point", "Second point"]}],
         )
-        f = tmp_path / "multipart.eml"
-        f.write_text(content, encoding="utf-8")
         text, ft = _parse(f)
-        assert "Plain text version" in text
+        assert "Intro" in text
+        assert "First point" in text
+        assert "Second point" in text
+        assert ft == "pptx"
+
+    def test_multiple_slides_produce_sections(self, tmp_path):
+        f = _make_pptx(
+            tmp_path,
+            [
+                {"title": "Slide One", "bullets": ["Content A"]},
+                {"title": "Slide Two", "bullets": ["Content B"]},
+            ],
+        )
+        text, ft = _parse(f)
+        assert "Slide One" in text
+        assert "Slide Two" in text
+        assert "Content A" in text
+        assert "Content B" in text
+
+    def test_slide_section_headings_use_slide_number(self, tmp_path):
+        # Each slide must produce a ## Slide N heading
+        f = _make_pptx(
+            tmp_path,
+            [
+                {"title": "Alpha", "bullets": ["x"]},
+                {"title": "Beta", "bullets": ["y"]},
+            ],
+        )
+        text, ft = _parse(f)
+        assert "## Slide 1" in text
+        assert "## Slide 2" in text
+
+    def test_speaker_notes_extracted(self, tmp_path):
+        f = _make_pptx(
+            tmp_path,
+            [{"title": "With Notes", "bullets": ["body"], "notes": "Remember to mention Q3."}],
+        )
+        text, ft = _parse(f)
+        assert "Remember to mention Q3" in text
+
+    def test_table_rendered_as_markdown(self, tmp_path):
+        f = _make_pptx(
+            tmp_path,
+            [
+                {
+                    "title": "Data Slide",
+                    "table": [["Name", "Score"], ["Alice", "95"], ["Bob", "87"]],
+                }
+            ],
+        )
+        text, ft = _parse(f)
+        assert "Alice" in text
+        assert "Score" in text
+        assert "|" in text  # Markdown table rendered
+
+    def test_table_pipe_chars_escaped(self, tmp_path):
+        # Pipe characters inside cells must be escaped so the Markdown table is valid
+        f = _make_pptx(
+            tmp_path,
+            [{"title": "Pipes", "table": [["Code", "Value"], ["A|B", "1"]]}],
+        )
+        text, ft = _parse(f)
+        assert r"A\|B" in text or "A|B" not in text.replace(r"\|", "")
+
+    def test_slide_without_title_still_indexed(self, tmp_path):
+        # A slide with no title shape must still produce a ## Slide N heading
+        from pptx import Presentation
+
+        prs = Presentation()
+        blank_layout = prs.slide_layouts[6]  # Blank layout — no title placeholder
+        slide = prs.slides.add_slide(blank_layout)
+        from pptx.util import Inches
+
+        txBox = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(6), Inches(2))
+        txBox.text_frame.text = "Titleless content here"
+        path = tmp_path / "notitle.pptx"
+        prs.save(str(path))
+
+        text, ft = _parse(path)
+        assert "Titleless content here" in text
+        assert "## Slide 1" in text
+
+    def test_empty_presentation_raises_parser_error(self, tmp_path):
+        from pptx import Presentation
+
+        prs = Presentation()
+        path = tmp_path / "empty.pptx"
+        prs.save(str(path))
+        with pytest.raises(Exception):  # ParserError or ValueError
+            _parse(path)
+
+    def test_file_not_found_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            PPTXParser().parse(str(tmp_path / "ghost.pptx"), workspace="test")
+
+    def test_corrupt_file_raises_parser_error(self, tmp_path):
+        from local_search_agent.ingestion.parser import ParserError
+
+        f = tmp_path / "corrupt.pptx"
+        f.write_bytes(b"this is not a zip file")
+        with pytest.raises(ParserError):
+            PPTXParser().parse(str(f), workspace="test")

@@ -96,6 +96,12 @@ class WorkspaceManager:
                 conn.execute("ALTER TABLE documents ADD COLUMN text TEXT NOT NULL DEFAULT ''")
             except sqlite3.OperationalError:
                 pass  # Column already exists (new install or already migrated)
+            # Index on source_path — used by document_needs_reindex() to look up
+            # whether any chunk of a file is already indexed, without knowing the
+            # chunk doc_ids in advance.
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_documents_source_path ON documents(source_path)"
+            )
         logger.debug("WorkspaceManager DB initialised at %r", self._db_path)
 
     def _connect(self) -> sqlite3.Connection:
@@ -242,11 +248,16 @@ class WorkspaceManager:
         """
         Return True if the file at source_path has changed since it was last indexed.
         Used by the incremental ingestion pipeline (Phase 4).
+
+        Queries by source_path rather than doc_id because chunked documents
+        store chunk-specific doc_ids (sha256(path:chunk:N)) — the base file
+        doc_id (sha256(path)) is never written to the DB.  Any chunk row for
+        this path carries the same modified_at, so one LIMIT 1 lookup is enough.
         """
-        doc_id = DocumentNode.make_doc_id(source_path)
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT modified_at FROM documents WHERE doc_id = ?", (doc_id,)
+                "SELECT modified_at FROM documents WHERE source_path = ? LIMIT 1",
+                (source_path,),
             ).fetchone()
         if row is None:
             return True  # Never indexed

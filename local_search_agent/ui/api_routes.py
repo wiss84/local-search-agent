@@ -474,24 +474,16 @@ def build_ui_router(app_state) -> APIRouter:
     async def ingest_wipe(body: IngestRequest) -> JSONResponse:
         """
         Wipe all indexed documents for the workspace (Meilisearch + SQLite),
-        then immediately kick off a force re-ingest.
+        then immediately kick off a force re-ingest with live progress tracking.
         """
-        workspace = body.workspace
-        try:
-            loop = asyncio.get_event_loop()
-            loop.run_in_executor(
-                None,
-                lambda: app_state.framework.wipe_and_reingest(workspace_name=workspace),
-            )
-            return JSONResponse(
-                {
-                    "ok": True,
-                    "message": f"Wipe and re-ingest started for {workspace!r}.",
-                }
-            )
-        except Exception as e:
-            logger.exception("Wipe & re-ingest failed for %r: %s", workspace, e)
-            raise HTTPException(status_code=500, detail=str(e))
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, _run_ingest, app_state, body.workspace, True, True)
+        return JSONResponse(
+            {
+                "ok": True,
+                "message": f"Wipe and re-ingest started for {body.workspace!r}.",
+            }
+        )
 
     @router.get("/ingest/status")
     async def ingest_status() -> JSONResponse:
@@ -878,8 +870,18 @@ def _sse_event(event_type: str, data: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _run_ingest(app_state, workspace: str, force: bool = False) -> None:
-    """Run ingestion synchronously in a background thread, reporting live progress."""
+def _run_ingest(app_state, workspace: str, force: bool = False, wipe: bool = False) -> None:
+    """Run ingestion synchronously in a background thread, reporting live progress.
+
+    Parameters
+    ----------
+    force : Re-index all files regardless of modification time.
+    wipe  : Delete the Meilisearch index and all SQLite document records for
+            the workspace before ingesting.  Implies force=True.
+    """
+    if wipe:
+        force = True
+
     # Register progress slot
     progress = _IngestProgress(workspace=workspace, status="running", started_at=time.monotonic())
     with _ingest_lock:
@@ -887,14 +889,10 @@ def _run_ingest(app_state, workspace: str, force: bool = False) -> None:
 
     def _callback(indexed: int, skipped: int, failed: int, total: int, current_file: str) -> None:
         with _ingest_lock:
-            # indexed/skipped/failed from pipeline are FILE counts, not chunk counts.
-            # chunks_indexed is updated separately via _flush_batch stats.
             progress.files_total = total
             progress.files_processed = indexed + skipped + failed
             progress.files_skipped = skipped
             progress.files_failed = failed
-            # 'indexed' from callback = files successfully parsed (not chunks).
-            # We derive chunks_indexed from the final stats at __done__.
             progress.current_file = (
                 os.path.basename(current_file) if current_file not in ("", "__done__") else ""
             )
@@ -903,7 +901,12 @@ def _run_ingest(app_state, workspace: str, force: bool = False) -> None:
                 progress.finished_at = time.monotonic()
 
     try:
-        logger.info("Manual ingest triggered for workspace %r (force=%s)", workspace, force)
+        logger.info(
+            "Manual ingest triggered for workspace %r (force=%s, wipe=%s)",
+            workspace,
+            force,
+            wipe,
+        )
         ws = app_state.workspace_manager.get_workspace(workspace)
         if ws is None:
             logger.error("Ingest: workspace %r not found", workspace)
@@ -929,13 +932,33 @@ def _run_ingest(app_state, workspace: str, force: bool = False) -> None:
             api_key=ws_config.meili_master_key,
             index_name=ws_config.index_name or workspace,
         )
+
+        # ── Wipe step ────────────────────────────────────────────────────
+        if wipe:
+            import sqlite3 as _sqlite3
+
+            try:
+                mc.delete_index()
+                logger.info("Wipe: Meilisearch index deleted for %r.", workspace)
+            except Exception as e:
+                logger.warning("Wipe: could not delete Meilisearch index for %r: %s", workspace, e)
+            try:
+                with _sqlite3.connect(app_state.config.db_path) as conn:
+                    deleted = conn.execute(
+                        "DELETE FROM documents WHERE workspace = ?", (workspace,)
+                    ).rowcount
+                    conn.commit()
+                logger.info("Wipe: removed %d SQLite document records for %r.", deleted, workspace)
+            except Exception as e:
+                logger.warning("Wipe: could not clear SQLite records for %r: %s", workspace, e)
+        # ─────────────────────────────────────────────────────────────────
+
         pipeline = IngestionPipeline(
             config=ws_config,
             workspace_manager=app_state.workspace_manager,
             meili_client=mc,
         )
         stats = pipeline.run(force=force, progress_callback=_callback)
-        # Write final chunk count now that pipeline is done
         with _ingest_lock:
             progress.chunks_indexed = stats.indexed
         logger.info("Manual ingest complete for %r: %s", workspace, stats)

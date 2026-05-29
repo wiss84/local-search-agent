@@ -300,6 +300,7 @@ class _JSBridge:
         """
         import subprocess
         import sys
+
         from local_search_agent.core.key_manager import set_saved_db_path
 
         set_saved_db_path(new_db_path.strip() or None)
@@ -313,13 +314,15 @@ class _JSBridge:
         # Spawn a short-lived helper that waits 2s for this process to exit
         # and release port 8765 before starting the new UI process.
         delayed_cmd = [
-            sys.executable, "-c",
-            f"import time; time.sleep(2); import subprocess; subprocess.Popen({cmd!r})"
+            sys.executable,
+            "-c",
+            f"import time; time.sleep(2); import subprocess; subprocess.Popen({cmd!r})",
         ]
         subprocess.Popen(delayed_cmd, close_fds=True)
 
         # Give the HTTP response a moment to reach the browser, then exit
         import threading
+
         threading.Timer(0.8, lambda: os._exit(0)).start()
 
     def pick_folder(self) -> Optional[str]:

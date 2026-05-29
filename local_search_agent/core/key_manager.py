@@ -400,6 +400,7 @@ def settings_file_path() -> str:
 # Custom DB path — stored in settings.json so the UI remembers it across restarts
 # ---------------------------------------------------------------------------
 
+
 def get_saved_db_path() -> Optional[str]:
     """Return the user-saved custom db_path, or None if using the default."""
     s = _load_settings()

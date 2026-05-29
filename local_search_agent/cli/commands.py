@@ -647,6 +647,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Local Search Agent — deterministic, auditable local document RAG.",
     )
     from local_search_agent.core.config import _default_db_path
+
     parser.add_argument(
         "--db",
         default=os.environ.get("LSA_DB_PATH") or _default_db_path(),

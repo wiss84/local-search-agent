@@ -33,6 +33,7 @@ def _default_db_path() -> str:
       Linux   : ~/.config/local-search-agent/local_search_agent.db
     """
     from platformdirs import user_config_dir
+
     config_dir = Path(user_config_dir("local-search-agent"))
     config_dir.mkdir(parents=True, exist_ok=True)
     return str(config_dir / "local_search_agent.db")

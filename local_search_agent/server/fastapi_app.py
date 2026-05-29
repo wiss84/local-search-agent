@@ -134,9 +134,9 @@ def build_app(
     # the source tree. For installed packages we ship docs/ inside the package so
     # it is always co-located with the Python code.
     _pkg_root = Path(__file__).resolve().parent.parent  # local_search_agent/
-    _docs_dir = _pkg_root.parent / "docs"              # source-tree location
+    _docs_dir = _pkg_root.parent / "docs"  # source-tree location
     if not _docs_dir.is_dir():
-        _docs_dir = _pkg_root / "docs"                 # installed package location
+        _docs_dir = _pkg_root / "docs"  # installed package location
     if _docs_dir.is_dir():
         _generate_docs_index(_docs_dir)
         app.mount("/help", StaticFiles(directory=str(_docs_dir), html=True), name="docs")

@@ -593,32 +593,34 @@ def build_ui_router(app_state) -> APIRouter:
             raise HTTPException(400, detail="db_path is required.")
         # Validate the parent directory exists
         import pathlib
+
         parent = pathlib.Path(new_db_path).parent
         if not parent.exists():
             raise HTTPException(400, detail=f"Directory does not exist: {parent}")
         # Persist immediately so the new process picks it up even if pywebview restart fails
         from local_search_agent.core.key_manager import set_saved_db_path
+
         set_saved_db_path(new_db_path)
         # Schedule the actual process restart
-        import threading
         import os as _os
         import subprocess as _subprocess
         import sys as _sys
+        import threading
+
         # Build the relaunch command using the same executable (works on all platforms)
         _cmd = [_sys.executable, "-m", "local_search_agent.ui.dashboard", "--db", new_db_path]
+
         def _do_restart():
             import time
+
             time.sleep(0.8)  # let the HTTP response reach the browser first
             # Spawn a short-lived helper process that waits for this process to die
             # and release its port before starting the new UI process.
             # Using a helper avoids the port-collision race on all platforms.
-            helper = (
-                f"import time, subprocess; "
-                f"time.sleep(2); "
-                f"subprocess.Popen({_cmd!r})"
-            )
+            helper = f"import time, subprocess; time.sleep(2); subprocess.Popen({_cmd!r})"
             _subprocess.Popen([_sys.executable, "-c", helper])
             _os._exit(0)
+
         threading.Thread(target=_do_restart, daemon=True).start()
         return JSONResponse({"ok": True, "restarting": True, "db_path": new_db_path})
 

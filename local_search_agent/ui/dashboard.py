@@ -292,6 +292,36 @@ class _JSBridge:
         window.pywebview.api.pick_folder().then(path => ...)
     """
 
+    def restart_with_db(self, new_db_path: str) -> None:
+        """
+        Save new_db_path to settings.json, spawn a fresh `local-search ui` process
+        with that path, then exit the current process.
+        Called from JS: window.pywebview.api.restart_with_db(path)
+        """
+        import subprocess
+        import sys
+        from local_search_agent.core.key_manager import set_saved_db_path
+
+        set_saved_db_path(new_db_path.strip() or None)
+
+        # Build the restart command — same executable, same args minus any old --db
+        cmd = [sys.executable, "-m", "local_search_agent.ui.dashboard"]
+        if new_db_path.strip():
+            cmd += ["--db", new_db_path.strip()]
+
+        logger.info("Restarting UI with db_path=%r", new_db_path)
+        # Spawn a short-lived helper that waits 2s for this process to exit
+        # and release port 8765 before starting the new UI process.
+        delayed_cmd = [
+            sys.executable, "-c",
+            f"import time; time.sleep(2); import subprocess; subprocess.Popen({cmd!r})"
+        ]
+        subprocess.Popen(delayed_cmd, close_fds=True)
+
+        # Give the HTTP response a moment to reach the browser, then exit
+        import threading
+        threading.Timer(0.8, lambda: os._exit(0)).start()
+
     def pick_folder(self) -> Optional[str]:
         """Open the native OS folder picker and return the selected path."""
         import webview
@@ -342,13 +372,11 @@ def run(
     open_window: bool = True,
     file_server_port: int = 8000,
 ) -> None:
-    from local_search_agent.core.config import SearchAgentConfig
+    from local_search_agent.core.config import SearchAgentConfig, _default_db_path
+    from local_search_agent.core.key_manager import get_saved_db_path
 
     if db_path is None:
-        db_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "local_search_agent.db",
-        )
+        db_path = get_saved_db_path() or _default_db_path()
 
     config = SearchAgentConfig(
         workspace_name="default",
@@ -444,15 +472,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=int(os.environ.get("LSA_PORT", "8765")))
     p.add_argument(
         "--db",
-        default=os.environ.get(
-            "LSA_DB_PATH",
-            os.path.join(
-                os.path.dirname(
-                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                ),  # project root
-                "local_search_agent.db",
-            ),
-        ),
+        default=os.environ.get("LSA_DB_PATH") or None,  # None → _default_db_path() in run()
     )
     p.add_argument(
         "--provider",

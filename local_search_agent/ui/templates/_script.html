@@ -861,13 +861,35 @@ $('btn-force-ingest').addEventListener('click', () => {
    ============================================================= */
 let pendingDirs = [];
 
-$('btn-new-workspace').addEventListener('click', () => {
+$('btn-new-workspace').addEventListener('click', async () => {
   pendingDirs = [];
   $('ws-name-input').value = ''; $('ws-dir-input').value = ''; $('ws-dir-chips').innerHTML = '';
+  $('ws-db-input').value = '';
+  // Show the default db path as a hint
+  try {
+    const info = await api('/db-info');
+    $('ws-db-hint').textContent = 'Default: ' + (info.db_path || '');
+  } catch { $('ws-db-hint').textContent = ''; }
   $('modal-workspace').classList.remove('hidden');
   $('ws-name-input').focus();
 });
 $('btn-ws-cancel').addEventListener('click', () => $('modal-workspace').classList.add('hidden'));
+
+$('btn-set-db').addEventListener('click', async () => {
+  const newPath = $('ws-db-input').value.trim();
+  if (!newPath) { alert('Please enter a database path first.'); return; }
+  if (!confirm(`Set database path to:\n${newPath}\n\nThe UI will restart now.`)) return;
+  const btn = $('btn-set-db');
+  btn.disabled = true; btn.textContent = 'Restarting…';
+  try {
+    await api('/restart', { method: 'POST', body: JSON.stringify({ db_path: newPath }) });
+    // Server will die shortly — show a message in case the window stays open briefly
+    $('ws-db-hint').textContent = 'Restarting…';
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Set & Restart';
+    alert('Failed to restart: ' + e.message);
+  }
+});
 
 $('btn-browse-dir').addEventListener('click', async () => {
   if (window.pywebview && window.pywebview.api) {

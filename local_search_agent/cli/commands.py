@@ -646,11 +646,11 @@ def build_parser() -> argparse.ArgumentParser:
         prog="local-search",
         description="Local Search Agent — deterministic, auditable local document RAG.",
     )
-    _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from local_search_agent.core.config import _default_db_path
     parser.add_argument(
         "--db",
-        default=os.environ.get("LSA_DB_PATH", os.path.join(_project_root, "local_search_agent.db")),
-        help="SQLite metadata database path.",
+        default=os.environ.get("LSA_DB_PATH") or _default_db_path(),
+        help="SQLite metadata database path (default: user config dir).",
     )
     parser.add_argument(
         "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"]

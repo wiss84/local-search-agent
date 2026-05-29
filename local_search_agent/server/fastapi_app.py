@@ -127,7 +127,16 @@ def build_app(
             filename=os.path.basename(source_path),
         )
 
-    _docs_dir = Path(__file__).resolve().parents[2] / "docs"
+    # Resolve the docs/ directory relative to the installed package root.
+    # When pip-installed, __file__ is inside site-packages/local_search_agent/server/,
+    # so parents[1] is the package root (local_search_agent/) and the docs/ folder
+    # sits one level above that alongside pyproject.toml — but that only exists in
+    # the source tree. For installed packages we ship docs/ inside the package so
+    # it is always co-located with the Python code.
+    _pkg_root = Path(__file__).resolve().parent.parent  # local_search_agent/
+    _docs_dir = _pkg_root.parent / "docs"              # source-tree location
+    if not _docs_dir.is_dir():
+        _docs_dir = _pkg_root / "docs"                 # installed package location
     if _docs_dir.is_dir():
         _generate_docs_index(_docs_dir)
         app.mount("/help", StaticFiles(directory=str(_docs_dir), html=True), name="docs")

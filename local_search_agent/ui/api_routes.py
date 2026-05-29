@@ -574,6 +574,54 @@ def build_ui_router(app_state) -> APIRouter:
             return JSONResponse({"running": False, "jobs": []})
         return JSONResponse(app_state.scheduler.get_status())
 
+    @router.get("/db-info")
+    async def db_info() -> JSONResponse:
+        """Return the current database path so the UI can display it as a hint."""
+        return JSONResponse({"db_path": app_state.config.db_path})
+
+    @router.post("/restart")
+    async def restart_with_db(request: Request) -> JSONResponse:
+        """
+        Save a new db_path and restart the UI process.
+        The actual restart is delegated to the pywebview JS bridge so it
+        runs in the main thread. We trigger it by calling window.pywebview.api
+        via a deferred JS evaluation after the HTTP response is sent.
+        """
+        body = await request.json()
+        new_db_path = body.get("db_path", "").strip()
+        if not new_db_path:
+            raise HTTPException(400, detail="db_path is required.")
+        # Validate the parent directory exists
+        import pathlib
+        parent = pathlib.Path(new_db_path).parent
+        if not parent.exists():
+            raise HTTPException(400, detail=f"Directory does not exist: {parent}")
+        # Persist immediately so the new process picks it up even if pywebview restart fails
+        from local_search_agent.core.key_manager import set_saved_db_path
+        set_saved_db_path(new_db_path)
+        # Schedule the actual process restart
+        import threading
+        import os as _os
+        import subprocess as _subprocess
+        import sys as _sys
+        # Build the relaunch command using the same executable (works on all platforms)
+        _cmd = [_sys.executable, "-m", "local_search_agent.ui.dashboard", "--db", new_db_path]
+        def _do_restart():
+            import time
+            time.sleep(0.8)  # let the HTTP response reach the browser first
+            # Spawn a short-lived helper process that waits for this process to die
+            # and release its port before starting the new UI process.
+            # Using a helper avoids the port-collision race on all platforms.
+            helper = (
+                f"import time, subprocess; "
+                f"time.sleep(2); "
+                f"subprocess.Popen({_cmd!r})"
+            )
+            _subprocess.Popen([_sys.executable, "-c", helper])
+            _os._exit(0)
+        threading.Thread(target=_do_restart, daemon=True).start()
+        return JSONResponse({"ok": True, "restarting": True, "db_path": new_db_path})
+
     # ----------------------------------------------------------------
     # Workspaces (UI-facing summary)
     # ----------------------------------------------------------------

@@ -56,7 +56,7 @@ Sources:
 - [Document Title](http://localhost:8000/docs/{{doc_id}})
 - [Another Document](http://localhost:8000/docs/{{doc_id}})
 
-omit the [part 2/4] suffix refrence from the citation description
+- Omit the [part 2/4] suffix refrence from the citation description
 
 ## Workspace Context
 

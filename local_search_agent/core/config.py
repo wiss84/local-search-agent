@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from local_search_agent.core.constants import (
@@ -17,6 +18,24 @@ from local_search_agent.core.constants import (
     DEFAULT_PORT,
     DEFAULT_TOP_K,
 )
+
+
+def _default_db_path() -> str:
+    """
+    Resolve the default SQLite database path.
+
+    Stored in the same user-config directory as keys.json / models.json /
+    settings.json so it survives pip upgrades and is independent of the
+    current working directory.
+
+      Windows : C:\\Users\\<name>\\AppData\\Roaming\\local-search-agent\\local_search_agent.db
+      macOS   : ~/Library/Application Support/local-search-agent/local_search_agent.db
+      Linux   : ~/.config/local-search-agent/local_search_agent.db
+    """
+    from platformdirs import user_config_dir
+    config_dir = Path(user_config_dir("local-search-agent"))
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return str(config_dir / "local_search_agent.db")
 
 
 @dataclass
@@ -83,7 +102,7 @@ class SearchAgentConfig:
     max_retries: int = DEFAULT_MAX_RETRIES
 
     # --- Persistence ---
-    db_path: str = "local_search_agent.db"
+    db_path: str = field(default_factory=_default_db_path)
 
     # --- Phase 5: Semantic search ---
     enable_semantic: bool = False

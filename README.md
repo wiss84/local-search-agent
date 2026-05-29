@@ -100,7 +100,9 @@ The desktop UI open:
 3. Get a free google api key from ai-studio. 
 4. Set your api key at the top bar's right corner, or add a paid key for anthropic\openai .
 Note: For paid models or ollama, you will need to set model name via the config button at the top  bar's right corner.
-5. Start asking questions.
+5. click Ingest from the left sidebar.
+6. watch the progress bar at the bottom bar, wait until all files marked as completed.
+7. Start asking questions.
 
 ### CLI
 

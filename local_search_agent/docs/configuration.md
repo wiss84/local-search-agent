@@ -89,7 +89,7 @@ Ollama always uses `None` — no key required.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `db_path` | `local_search_agent.db` | Path to the SQLite database that stores workspace registrations, sync history, and health tracking. |
+| `db_path` | user config dir | Path to the SQLite database that stores workspace registrations, document metadata, sync history, and chat sessions. Defaults to `local_search_agent.db` in your OS user config directory — the same location as `keys.json`, `models.json`, and `settings.json`. This means the database survives `pip install --upgrade` and is independent of your working directory. |
 
 ### Semantic Search (Experimental)
 
@@ -202,6 +202,16 @@ config = SearchAgentConfig(
     db_path="/var/lib/local-search-agent/production.db",
 )
 ```
+
+The default location on each platform is:
+
+| Platform | Default path |
+|----------|--------------|
+| Windows | `C:\Users\<name>\AppData\Roaming\local-search-agent\local_search_agent.db` |
+| macOS | `~/Library/Application Support/local-search-agent/local_search_agent.db` |
+| Linux | `~/.config/local-search-agent/local_search_agent.db` |
+
+You can also override it via the `LSA_DB_PATH` environment variable or the `--db` CLI flag, without changing your Python code.
 
 ### Tune for large document sets
 

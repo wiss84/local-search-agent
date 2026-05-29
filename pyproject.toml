@@ -139,6 +139,7 @@ exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 "local_search_agent.ui" = ["templates/*.html", "assets/*"]
+"local_search_agent" = ["docs/**/*", "docs/*"]
 
 # ---------------------------------------------------------------------------
 # Ruff

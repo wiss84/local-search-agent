@@ -394,3 +394,27 @@ def set_all_semantic_settings(
 def settings_file_path() -> str:
     """Return the path to the settings.json file (for display purposes)."""
     return str(_settings_path())
+
+
+# ---------------------------------------------------------------------------
+# Custom DB path — stored in settings.json so the UI remembers it across restarts
+# ---------------------------------------------------------------------------
+
+
+def get_saved_db_path() -> Optional[str]:
+    """Return the user-saved custom db_path, or None if using the default."""
+    s = _load_settings()
+    return s.get("db_path") or None
+
+
+def set_saved_db_path(path: Optional[str]) -> None:
+    """
+    Persist a custom db_path to settings.json.
+    Pass None to clear it (revert to default).
+    """
+    s = _load_settings()
+    if path:
+        s["db_path"] = str(path)
+    else:
+        s.pop("db_path", None)
+    _save_settings(s)

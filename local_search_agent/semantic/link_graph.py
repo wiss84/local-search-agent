@@ -1,5 +1,5 @@
 """
-Link graph: SQLite cross-document relationship store (opt-in, Phase 5).
+Link graph: SQLite cross-document relationship store (opt-in).
 
 Responsibility
 --------------

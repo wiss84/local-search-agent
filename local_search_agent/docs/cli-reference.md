@@ -10,7 +10,7 @@ local-search [--db <path>] [--log-level LEVEL] <command> [subcommand] [options]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--db` | `local_search_agent.db` | SQLite metadata database path. Also reads from `LSA_DB_PATH` env var. |
+| `--db` | user config dir | SQLite metadata database path. Defaults to `local_search_agent.db` in your OS user config directory (same location as `keys.json`). Also reads from `LSA_DB_PATH` env var. |
 | `--log-level` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
 ---
@@ -150,6 +150,7 @@ local-search ui [options]
 |--------|---------|-------------|
 | `--host` | `127.0.0.1` | Dashboard API server host. Also reads `LSA_HOST`. |
 | `--port` | `8765` | Dashboard API server port. Also reads `LSA_PORT`. |
+| `--db` | user config dir | SQLite database path. Overrides the default location for this session. Also reads `LSA_DB_PATH`. |
 | `--provider` | `google` | LLM provider: `google`, `ollama`, `openai`, `anthropic`. Also reads `LSA_PROVIDER`. |
 | `--model` | `gemma-4-31b-it` | Model name. Also reads `LSA_MODEL`. |
 | `--meili-url` | `http://localhost:7700` | Meilisearch URL. Also reads `MEILI_URL`. |
@@ -169,12 +170,15 @@ Manage workspaces (named collections of documents).
 local-search workspace create <name> <dir>
 ```
 
-Registers a new workspace pointing to a document directory. Creates sync tracking records in MetadataDB.
+Registers a new workspace pointing to a document directory. Creates sync tracking records in MetadataDB. Uses the database at the path specified by `--db` (global flag) or the default user config location.
 
 ```bash
 local-search workspace create finance "C:\Shares\FinanceDocs"
 local-search workspace create hr ./hr_policies
 local-search workspace create legal /mnt/legal_repository
+
+# Use a custom database location
+local-search --db D:\mydata\search.db workspace create finance "C:\Shares\FinanceDocs"
 ```
 
 ### workspace list
@@ -228,6 +232,9 @@ local-search ingest --workspace finance --dirs "C:\Shares\FinanceDocs"
 local-search ingest --workspace finance --dirs "C:\dir1" "C:\dir2"
 local-search ingest --workspace finance --dirs "C:\Shares\FinanceDocs" --force
 local-search ingest --workspace finance --dirs "C:\Shares\FinanceDocs" --wipe
+
+# Custom database location
+local-search --db D:\mydata\search.db ingest --workspace finance --dirs "C:\Shares\FinanceDocs"
 ```
 
 ---
@@ -284,6 +291,9 @@ Omit `question` to enter interactive mode.
 local-search query "What was the AWS spend in Q3?" --workspace finance --provider google
 local-search query "Vacation policy?" --workspace hr --provider ollama --model mistral
 local-search query --workspace finance --provider google   # Interactive mode
+
+# Custom database location
+local-search --db D:\mydata\search.db query "What is the budget?" --workspace finance
 ```
 
 ---

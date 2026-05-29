@@ -18,6 +18,15 @@
       </div>
       <div class="dir-chips" id="ws-dir-chips"></div>
     </div>
+    <div class="modal-field">
+      <label class="modal-label">Database path <span style="font-weight:400;color:var(--text-muted)">(optional — leave blank for default)</span></label>
+      <div class="modal-row">
+        <input type="text" class="modal-input" id="ws-db-input" placeholder="Leave blank to use default location" style="flex:1" />
+        <button class="modal-btn ghost" id="btn-set-db" style="white-space:nowrap;margin-left:6px">Set &amp; Restart</button>
+      </div>
+      <div id="ws-db-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div>
+      <div style="font-size:11px;color:var(--amber,#f59e0b);margin-top:4px">&#9888; Changing the database path will restart the UI.</div>
+    </div>
     <div class="modal-actions">
       <button class="modal-btn ghost" id="btn-ws-cancel">Cancel</button>
       <button class="modal-btn primary" id="btn-ws-create">Create</button>

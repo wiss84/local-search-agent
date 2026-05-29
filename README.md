@@ -95,9 +95,9 @@ local-search ui
 ```
 
 The desktop UI open:
-1. Create a workspace, name it, point it at a directory of files.
-2. Ingest (parse, clean, chunk). 
-3. Get a free google api key from ai-studio. 
+1. Create a workspace, name it, point it at a directory of files. The "Database path" field is optional — leave it blank to use the default location (`AppData/Roaming/local-search-agent/` on Windows).
+2. Ingest (parse, clean, chunk).
+3. Get a free google api key from ai-studio.
 4. Set your api key at the top bar's right corner, or add a paid key for anthropic\openai .
 Note: For paid models or ollama, you will need to set model name via the config button at the top  bar's right corner.
 5. click Ingest from the left sidebar.
@@ -130,6 +130,9 @@ config = SearchAgentConfig(
     document_dirs=["C:/my_docs"],
     workspace_name="finance",
     provider="google",
+    # db_path defaults to your OS user config dir — same location as keys.json
+    # override only if you need a custom location:
+    # db_path="D:/mydata/search.db",
 )
 
 framework = SearchAgentFramework(config)

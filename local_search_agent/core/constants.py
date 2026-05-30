@@ -3,7 +3,7 @@ Global constants for the Local Search Agent framework.
 """
 
 # Package version
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 # Default server settings
 DEFAULT_HOST = "127.0.0.1"

@@ -49,13 +49,13 @@ Everything runs locally. Meilisearch downloads automatically on first use, no ma
 ## Screenshots
 
 ### Desktop UI
-![Local Search Agent UI](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/assets/local_search_agent_ui.webp)
+![Local Search Agent UI](https://raw.githubusercontent.com/wiss84/local-search-agent/main/local_search_agent/docs/assets/local_search_agent_ui.webp)
 
 ### CLI Interactive Mode
-![Local Search Agent CLI](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/assets/local_search_agent_cli.webp)
+![Local Search Agent CLI](https://raw.githubusercontent.com/wiss84/local-search-agent/main/local_search_agent/docs/assets/local_search_agent_cli.webp)
 
 ### Python API
-![Local Search Agent Python API](https://raw.githubusercontent.com/wiss84/local-search-agent/main/docs/assets/local_search_agent_api.webp)
+![Local Search Agent Python API](https://raw.githubusercontent.com/wiss84/local-search-agent/main/local_search_agent/docs/assets/local_search_agent_api.webp)
 
 ---
 
@@ -95,7 +95,7 @@ local-search ui
 ```
 
 The desktop UI open:
-1. Create a workspace, name it, point it at a directory of files. The "Database path" field is optional — leave it blank to use the default location (`AppData/Roaming/local-search-agent/` on Windows).
+1. Create a workspace, name it, point it at a directory of files. The "Database path" field is optional — leave it blank to use the default location shown in the hint, or paste a custom path and click "Set & Restart".
 2. Ingest (parse, clean, chunk).
 3. Get a free google api key from ai-studio.
 4. Set your api key at the top bar's right corner, or add a paid key for anthropic\openai .
@@ -180,16 +180,16 @@ print(response["answer"])
 
 | Guide | Description |
 |-------|-------------|
-| [Getting Started](https://github.com/wiss84/local-search-agent/blob/main/docs/getting-started.md) | First steps, quick start for UI, CLI, and Python API |
-| [Installation](https://github.com/wiss84/local-search-agent/blob/main/docs/installation.md) | Full install guide, API keys, Ollama setup, platform notes |
-| [Architecture](https://github.com/wiss84/local-search-agent/blob/main/docs/architecture.md) | Full architrecture, design guide |
-| [CLI Reference](https://github.com/wiss84/local-search-agent/blob/main/docs/cli-reference.md) | All commands and flags |
-| [Python API Reference](https://github.com/wiss84/local-search-agent/blob/main/docs/api-reference.md) | Full API documentation |
-| [Configuration](https://github.com/wiss84/local-search-agent/blob/main/docs/configuration.md) | All config options and patterns |
-| [Ingestion](https://github.com/wiss84/local-search-agent/blob/main/docs/ingestion.md) | How ingestion works, supported formats, chunking, scheduler |
-| [Multi-Workspace](https://github.com/wiss84/local-search-agent/blob/main/docs/multi-workspace.md) | Managing multiple document collections |
-| [Semantic Search](https://github.com/wiss84/local-search-agent/blob/main/docs/semantic-search.md) | Experimental: concept extraction, query expansion, link graph |
-| [Troubleshooting](https://github.com/wiss84/local-search-agent/blob/main/docs/troubleshooting.md) | Common issues and fixes |
+| [Getting Started](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/getting-started.md) | First steps, quick start for UI, CLI, and Python API |
+| [Installation](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/installation.md) | Full install guide, API keys, Ollama setup, platform notes |
+| [Architecture](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/architecture.md) | Full architrecture, design guide |
+| [CLI Reference](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/cli-reference.md) | All commands and flags |
+| [Python API Reference](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/api-reference.md) | Full API documentation |
+| [Configuration](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/configuration.md) | All config options and patterns |
+| [Ingestion](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/ingestion.md) | How ingestion works, supported formats, chunking, scheduler |
+| [Multi-Workspace](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/multi-workspace.md) | Managing multiple document collections |
+| [Semantic Search](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/semantic-search.md) | Experimental: concept extraction, query expansion, link graph |
+| [Troubleshooting](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/troubleshooting.md) | Common issues and fixes |
 
 ---
 

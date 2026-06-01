@@ -118,7 +118,7 @@ local-search serve --workspace finance
 local-search query "What was the AWS spend in Q3?" --workspace finance --provider google
 
 # Use interactive mode
-local-search --workspace finance --provider google
+local-search query --workspace finance --provider google
 ```
 
 ### Python API
@@ -142,6 +142,45 @@ framework.start_file_server()
 response = framework.query("What was the AWS spend in Q3?")
 print(response["answer"])
 ```
+
+### Agent Tool Integration
+
+Wrap an indexed workspace as a tool and plug it into any external AI agent — LangChain, LangGraph, Google Gemini SDK, or any framework that calls a function.
+
+```python
+from local_search_agent import SearchAgentFramework, SearchAgentConfig, LocalSearchTool
+
+config = SearchAgentConfig(
+    document_dirs=["C:/skills"],
+    workspace_name="skills",
+    provider="google",
+    model_name="gemini-2.0-flash-lite",  # cheap model for retrieval
+)
+
+# Index once
+framework = SearchAgentFramework(config)
+framework.ingest_and_index()
+framework.start_file_server()
+
+# Create the tool
+skill_tool = LocalSearchTool(config)
+
+# Use inside a LangChain / LangGraph agent
+from langchain.tools import tool
+
+@tool
+def search_skills(query: str) -> str:
+    """Search the skills knowledge base for coding patterns and techniques."""
+    return skill_tool.run(query).answer
+```
+
+Pass `return_raw=True` to bypass the internal LLM summarisation and return the full document text verbatim — useful when the calling agent should reason over the raw content itself:
+
+```python
+skill_tool = LocalSearchTool(config, return_raw=True)
+```
+
+See the [Python API Reference](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/api-reference.md#localsearchtool) for the full `LocalSearchTool` documentation.
 
 ---
 

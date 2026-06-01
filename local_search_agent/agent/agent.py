@@ -159,6 +159,31 @@ class LocalSearchAgent:
         graph.add_edge("call_tools", "call_llm")
         return graph.compile()
 
+    def query_raw_state(
+        self,
+        question: str,
+        workspace: Optional[str] = None,
+    ) -> dict:
+        """Run the agent and return the raw LangGraph state."""
+        effective_workspace = workspace or self._config.workspace_name
+        system_msg = SystemMessage(
+            content=build_system_prompt(
+                workspace_name=effective_workspace,
+                document_dirs=self._config.document_dirs,
+            )
+        )
+        initial_state: AgentState = {
+            "messages": [system_msg, HumanMessage(content=question)],
+            "iterations": 0,
+            "sources_seen": set(),
+            "truncated": False,
+        }
+        graph = self._get_graph()
+        return graph.invoke(
+            initial_state,
+            config={"recursion_limit": LANGGRAPH_RECURSION_LIMIT},
+        )
+
     def query(
         self,
         question: str,

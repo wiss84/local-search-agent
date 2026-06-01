@@ -17,7 +17,97 @@ from local_search_agent import (
     IndexHealthSummary,
     WorkspaceManager,
     MetadataDB,
+    # Agent tool integration
+    LocalSearchTool,
+    ToolResult,
 )
+```
+
+---
+
+## LocalSearchTool
+
+Use this when you want to integrate Local Search Agent into another AI agent or application. Instead of querying the framework directly, you wrap an indexed workspace as a tool that any external agent can call with a plain query string and get a clean answer back.
+
+There are two steps: **index your documents once**, then **create the tool** and hand it to your agent.
+
+### Step 1 — Index your documents and start the file server
+
+Do this once, or whenever your documents change. It is separate from the tool itself.
+
+```python
+from local_search_agent import SearchAgentFramework, SearchAgentConfig
+
+config = SearchAgentConfig(
+    document_dirs=["C:\\Users\\username\\Desktop\\skills_documents"],
+    workspace_name="skills",
+    provider="google",
+    api_key=None,               # reads from GOOGLE_API_KEY env var if omitted
+    model_name="gemini-2.0-flash-lite",
+)
+
+framework = SearchAgentFramework(config)
+framework.ingest_and_index()
+framework.start_file_server()  # must be running before the tool is used
+```
+
+### Step 2 — Create the tool
+
+Once the workspace is indexed, create a `LocalSearchTool` from the same config and pass it to your agent.
+
+```python
+from local_search_agent import LocalSearchTool
+
+skill_tool = LocalSearchTool(config)
+
+# Optional: pass return_raw=True to bypass LLM summarisation and return
+# the full document text verbatim. Use this when the calling agent should
+# reason over the raw content itself (e.g. skill files, memory files).
+skill_tool = LocalSearchTool(config, return_raw=True)
+```
+
+### ToolResult
+
+`skill_tool.run(query)` returns a `ToolResult`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `answer` | `str` | Answer synthesised by the internal agent |
+| `sources` | `list[str]` | Titles of the source documents used |
+
+`str(result)` returns just the answer, so the tool works as a drop-in wherever a string is expected.
+
+### Usage with LangChain
+
+```python
+from langchain.tools import tool
+
+@tool
+def skill_search(query: str) -> str:
+    """Search the skills knowledge base for coding patterns and techniques."""
+    return skill_tool.run(query).answer
+
+# Bind skill_search to your LangChain agent the same way as any other tool
+```
+
+### Usage without LangChain
+
+```python
+result = skill_tool.run("how do I handle rate limits in Python?")
+print(result.answer)
+print(result.sources)   # ["rate_limit_handler", "retry_patterns"]
+```
+
+### Multiple tools
+
+Create one tool per directory. Each uses its own `workspace_name` which maps to a separate Meilisearch index.
+
+```python
+from local_search_agent import SearchAgentConfig, LocalSearchTool
+
+skill_tool  = LocalSearchTool(SearchAgentConfig(document_dirs=["C:/skills"],  workspace_name="skills",  ...))
+memory_tool = LocalSearchTool(SearchAgentConfig(document_dirs=["C:/memory"],  workspace_name="memory",  ...))
+docs_tool   = LocalSearchTool(SearchAgentConfig(document_dirs=["C:/docs"],    workspace_name="docs",    ...))
 ```
 
 ---

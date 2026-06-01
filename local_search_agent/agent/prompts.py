@@ -33,7 +33,6 @@ Each row is one specific scenario inside the loop. Match the trigger, follow the
 | 4    | ITERATE | Search returns no relevant snippets  | `search_local_index` | Refine your query | Read all the results and go back to step 2 | - |
 | 5    | NO ANSWER | Search returns no relevant snippets after multiple tries | - | - | - | Say clearly: "I could not find this information in the available documents." |
 
-
 ### [HARD RULES]
 
 - **Never answer from memory.** If you haven't searched for it and fetched it, you don't know it.

@@ -89,6 +89,13 @@ def chunk_document(node: DocumentNode) -> list[DocumentNode]:
     """
     text = node.text
 
+    if node.file_type == "md":
+        logger.debug(
+            "Skipping chunking for markdown file %r (always retained as single document)",
+            node.title,
+        )
+        return [node]
+
     if len(text) < CHUNK_MIN_CHARS:
         logger.debug(
             "Skipping chunking for short document %r (%d chars)",

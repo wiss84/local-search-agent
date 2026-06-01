@@ -28,6 +28,7 @@ from local_search_agent.semantic.enricher import SemanticEnricher
 from local_search_agent.semantic.link_graph import LinkGraph
 from local_search_agent.semantic.query_expander import QueryExpander
 from local_search_agent.semantic.structural_parser import StructuralMetadata, StructuralParser
+from local_search_agent.tools.search_tool import LocalSearchTool, ToolResult
 from local_search_agent.workspace.metadata_db import MetadataDB
 from local_search_agent.workspace.workspace_manager import WorkspaceManager
 
@@ -36,6 +37,9 @@ __all__ = [
     "SearchAgentFramework",
     "SearchAgentConfig",
     "DocumentNode",
+    # Tools
+    "LocalSearchTool",
+    "ToolResult",
     # Ingestion
     "IngestionPipeline",
     "IngestStats",

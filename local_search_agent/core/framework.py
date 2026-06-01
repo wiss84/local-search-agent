@@ -210,6 +210,17 @@ class SearchAgentFramework:
         )
         return agent.query(question=question, top_k=top_k, workspace=workspace)
 
+    def query_raw_state(self, question: str, workspace: Optional[str] = None) -> dict:
+        """Run the agent and return the raw LangGraph state (messages list)."""
+        from local_search_agent.agent.agent import LocalSearchAgent
+
+        self._resolve_document_dirs(workspace)
+        agent = LocalSearchAgent(
+            config=self.config,
+            meili_client=self._get_meili_client(),
+        )
+        return agent.query_raw_state(question=question, workspace=workspace)
+
     # ------------------------------------------------------------------
     # Phase 4: Multi-workspace management
     # ------------------------------------------------------------------

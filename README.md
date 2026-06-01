@@ -63,6 +63,7 @@ Everything runs locally. Meilisearch downloads automatically on first use, no ma
 
 - **Native UI** — Watch the [UI design and configuration video demo](https://youtu.be/J-POiSDbArs)
 - **CLI AGENT** — Watch the [Terminal document querying video demo](https://youtu.be/ZIiN4NG5g3U)
+- **Python API** — Watch the [Local Search Agent API Integration video demo](https://youtu.be/JfoLKScLi1Y)
 
 ---
 
@@ -166,7 +167,7 @@ framework.start_file_server()
 skill_tool = LocalSearchTool(config)
 
 # Use inside a LangChain / LangGraph agent
-from langchain.tools import tool
+from langchain_core.tools import tool
 
 @tool
 def search_skills(query: str) -> str:

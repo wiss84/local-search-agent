@@ -80,7 +80,7 @@ skill_tool = LocalSearchTool(config, return_raw=True)
 ### Usage with LangChain
 
 ```python
-from langchain.tools import tool
+from langchain_core.tools import tool
 
 @tool
 def skill_search(query: str) -> str:
@@ -100,14 +100,32 @@ print(result.sources)   # ["rate_limit_handler", "retry_patterns"]
 
 ### Multiple tools
 
-Create one tool per directory. Each uses its own `workspace_name` which maps to a separate Meilisearch index.
+Create one tool per directory. Each uses its own `workspace_name` which maps to a separate Meilisearch index. Each workspace needs to be indexed independently before the tool is used.
+
+The file server is workspace-agnostic — it serves any document by `doc_id` regardless of which workspace it belongs to. This means you only need to call `start_file_server()` once, from any one of the framework instances.
 
 ```python
-from local_search_agent import SearchAgentConfig, LocalSearchTool
+from local_search_agent import SearchAgentFramework, SearchAgentConfig, LocalSearchTool
 
-skill_tool  = LocalSearchTool(SearchAgentConfig(document_dirs=["C:/skills"],  workspace_name="skills",  ...))
-memory_tool = LocalSearchTool(SearchAgentConfig(document_dirs=["C:/memory"],  workspace_name="memory",  ...))
-docs_tool   = LocalSearchTool(SearchAgentConfig(document_dirs=["C:/docs"],    workspace_name="docs",    ...))
+skill_config      = SearchAgentConfig(document_dirs=["C:/skills"],     workspace_name="skills",     ...)
+memory_config     = SearchAgentConfig(document_dirs=["C:/memory"],     workspace_name="memory",     ...)
+finance_config    = SearchAgentConfig(document_dirs=["C:/finance"],    workspace_name="finance",    ...)
+accounting_config = SearchAgentConfig(document_dirs=["C:/accounting"], workspace_name="accounting", ...)
+
+# Index each workspace independently
+SearchAgentFramework(skill_config).ingest_and_index()
+SearchAgentFramework(memory_config).ingest_and_index()
+SearchAgentFramework(finance_config).ingest_and_index()
+SearchAgentFramework(accounting_config).ingest_and_index()
+
+# Start the file server once — workspace does not matter here
+SearchAgentFramework(skill_config).start_file_server()
+
+# Create the tools
+skill_tool      = LocalSearchTool(skill_config,      return_raw=True)
+memory_tool     = LocalSearchTool(memory_config,     return_raw=True)
+finance_tool    = LocalSearchTool(finance_config)
+accounting_tool = LocalSearchTool(accounting_config)
 ```
 
 ---

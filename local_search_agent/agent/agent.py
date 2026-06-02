@@ -26,7 +26,6 @@ from local_search_agent.agent.prompts import MAX_ITERATIONS_NOTICE, build_system
 from local_search_agent.agent.provider_factory import build_llm
 from local_search_agent.agent.rate_limit_handler import RateLimitHandler
 from local_search_agent.agent.tools.fetch_tool import build_fetch_tool
-from local_search_agent.agent.tools.graph_tool import build_graph_tool
 from local_search_agent.agent.tools.search_tool import build_search_tool
 from local_search_agent.core.config import SearchAgentConfig
 from local_search_agent.core.constants import LANGGRAPH_RECURSION_LIMIT
@@ -72,7 +71,6 @@ class LocalSearchAgent:
                 self._tools = [
                     build_search_tool(self._meili, self._config),
                     build_fetch_tool(self._config),
-                    build_graph_tool(self._config, self._workspace_manager),
                 ]
                 self._tool_map = {t.name: t for t in self._tools}
         return self._tools

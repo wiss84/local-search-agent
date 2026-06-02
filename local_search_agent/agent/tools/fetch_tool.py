@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Maximum characters to return to the agent per fetch.
 # Prevents enormous documents from flooding the context window.
 # The agent can search within the returned text to find what it needs.
-_MAX_FETCH_CHARS = 12_000
+_MAX_FETCH_CHARS = 20_000
 
 
 def build_fetch_tool(config):

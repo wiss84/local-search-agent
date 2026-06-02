@@ -1,4 +1,4 @@
-# Semantic Search (Experimental)
+# Semantic Search
 
 > **Status: Experimental.** Semantic search features work but add LLM calls at ingest time and increase indexing cost. They are disabled by default.
 
@@ -11,9 +11,8 @@ The semantic layer bridges this gap without vectors. Instead of embeddings, it u
 - **ConceptCompiler** extracts concepts and synonyms from each document at ingest time using the LLM
 - **StructuralParser** extracts key-value pairs, definitions, and references using pure regex — no LLM
 - **QueryExpander** expands user queries at search time using the extracted concepts
-- **LinkGraph** builds cross-document same-topic relationships at ingest time
 
-All four components are opt-in and independent.
+Both components are opt-in and independent.
 
 ---
 
@@ -28,7 +27,6 @@ config = SearchAgentConfig(
     provider="google",
     enable_semantic=True,          # ConceptCompiler + StructuralParser at ingest
     enable_query_expansion=True,   # QueryExpander at search time
-    enable_link_graph=True,        # LinkGraph at ingest
 )
 ```
 
@@ -78,13 +76,7 @@ Runs at search time when a user sends a query. Before passing the query to Meili
 
 **Example:** User asks `"cloud spend"` → expanded to `"cloud spend AWS EC2 billing virtual machines VM costs"` → better recall against documents that use different terminology.
 
-No extra LLM call by default — expansion uses the concept index. An optional LLM-powered expansion mode is available via `semantic_model`.
-
-### LinkGraph
-
-Builds a cross-document relationship graph at ingest time. Documents covering the same topic are linked via a SQLite table. The agent can use the `get_related_docs` tool to follow these links and retrieve related documents it might not have found through direct search.
-
-**Example:** Agent searches for "parental leave" in `hr` workspace → finds the primary policy doc → follows link graph → retrieves the 2024 policy amendment it would have missed otherwise.
+No extra LLM call — expansion uses the concept index built at ingest time.
 
 ---
 
@@ -95,7 +87,6 @@ Builds a cross-document relationship graph at ingest time. Documents covering th
 | ConceptCompiler | +1 LLM call/doc | none | Better recall for synonym-heavy queries |
 | StructuralParser | negligible (regex) | none | Better recall for structured docs |
 | QueryExpander | none | +index lookup | Better recall for paraphrased queries |
-| LinkGraph | +graph write/read per doc | +1 DB lookup | Related document discovery |
 
 For a 1,000-document corpus with `enable_semantic=True`, expect ingestion to take roughly 3–5x longer than without. Re-ingestion on changed files still uses delta logic — only changed files pay the concept compilation cost again.
 
@@ -126,10 +117,6 @@ config = SearchAgentConfig(
 **Enable StructuralParser if:**
 - Your documents contain policy definitions, technical specs, or key-value data
 - Users ask about specific defined terms or parameters
-
-**Enable LinkGraph if:**
-- Your documents reference each other (amendments, annexes, related reports)
-- You want the agent to follow document relationships automatically
 
 **Keep all disabled if:**
 - Your corpus is small (under a few hundred documents) — BM25 is likely sufficient

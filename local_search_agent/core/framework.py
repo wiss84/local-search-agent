@@ -468,14 +468,9 @@ class SearchAgentFramework:
         self,
         enable_semantic: bool,
         enable_query_expansion: bool,
-        enable_link_graph: bool,
     ) -> None:
         """
         Update semantic feature flags at runtime and persist them to settings.json.
-
-        Changes take effect immediately for the next query. If ``enable_link_graph``
-        changes, the agent is also rebuilt on the next query so the
-        ``get_related_docs`` tool is correctly added or removed.
 
         Settings are written to the user config directory so they are shared
         across CLI, UI, and future Python API sessions.
@@ -484,8 +479,6 @@ class SearchAgentFramework:
         ----------
         enable_semantic        : Run ConceptCompiler + StructuralParser at ingest.
         enable_query_expansion : Expand queries with synonyms at search time.
-        enable_link_graph      : Build cross-document topic links and expose
-                                 the ``get_related_docs`` agent tool.
 
         Example
         -------
@@ -493,63 +486,34 @@ class SearchAgentFramework:
         framework.set_semantic_settings(
             enable_semantic=True,
             enable_query_expansion=True,
-            enable_link_graph=False,
         )
         ```
         """
         from local_search_agent.core.key_manager import set_all_semantic_settings
 
-        prev_link_graph = self.config.enable_link_graph
-
         self.config.enable_semantic = enable_semantic
         self.config.enable_query_expansion = enable_query_expansion
-        self.config.enable_link_graph = enable_link_graph
 
         set_all_semantic_settings(
             enable_semantic=enable_semantic,
             enable_query_expansion=enable_query_expansion,
-            enable_link_graph=enable_link_graph,
         )
 
-        # Force agent rebuild if link_graph changed (tool list changes)
-        if prev_link_graph != enable_link_graph and hasattr(self, "_agent"):
-            self._agent = None
-            logger.info(
-                "enable_link_graph changed to %s — agent will rebuild on next query.",
-                enable_link_graph,
-            )
-
         logger.info(
-            "Semantic settings updated: enable_semantic=%s, "
-            "enable_query_expansion=%s, enable_link_graph=%s",
+            "Semantic settings updated: enable_semantic=%s, enable_query_expansion=%s",
             enable_semantic,
             enable_query_expansion,
-            enable_link_graph,
         )
 
     def get_semantic_settings(self) -> dict[str, bool]:
         """
         Return the current semantic feature flag settings.
 
-        Returns the live in-memory values from the config (which always reflect
-        the last call to :meth:`set_semantic_settings` or the values loaded from
-        ``settings.json`` at startup).
-
         Returns
         -------
-        dict with keys: ``enable_semantic``, ``enable_query_expansion``,
-        ``enable_link_graph``
-
-        Example
-        -------
-        ```python
-        settings = framework.get_semantic_settings()
-        print(settings)
-        # {'enable_semantic': True, 'enable_query_expansion': True, 'enable_link_graph': False}
-        ```
+        dict with keys: ``enable_semantic``, ``enable_query_expansion``
         """
         return {
             "enable_semantic": self.config.enable_semantic,
             "enable_query_expansion": self.config.enable_query_expansion,
-            "enable_link_graph": self.config.enable_link_graph,
         }

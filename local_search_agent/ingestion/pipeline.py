@@ -179,7 +179,7 @@ class IngestionPipeline:
     # ------------------------------------------------------------------
 
     def _get_enricher(self):
-        """Lazily build SemanticEnricher if Phase 5 semantic features are enabled."""
+        """Lazily build SemanticEnricher if semantic features are enabled."""
         if not self._config.enable_semantic:
             return None
         if self._enricher is None:
@@ -187,15 +187,29 @@ class IngestionPipeline:
                 from local_search_agent.agent.provider_factory import build_llm
                 from local_search_agent.semantic.enricher import SemanticEnricher
 
-                llm = build_llm(self._config)
+                # Use semantic_model/provider override if set in settings
+                if self._config.semantic_model:
+                    from local_search_agent.core.config import SearchAgentConfig
+                    from local_search_agent.core.key_manager import get_semantic_settings
+
+                    sem_settings = get_semantic_settings()
+                    sem_provider = sem_settings.get("semantic_provider") or self._config.provider
+                    sem_config = SearchAgentConfig(
+                        provider=sem_provider,
+                        api_key=self._config.api_key,
+                        model_name=self._config.semantic_model,
+                    )
+                    llm = build_llm(sem_config)
+                else:
+                    llm = build_llm(self._config)
+
                 self._enricher = SemanticEnricher(
                     llm=llm,
                     enable_structural=True,
-                    enable_link_graph=self._config.enable_link_graph,
-                    db_path=self._config.db_path if self._config.enable_link_graph else None,
                 )
                 logger.info(
-                    "SemanticEnricher initialised (link_graph=%s).", self._config.enable_link_graph
+                    "SemanticEnricher initialised (model=%r).",
+                    self._config.semantic_model or self._config.model_name,
                 )
             except Exception as e:
                 logger.warning("SemanticEnricher init failed: %s. Indexing without semantics.", e)

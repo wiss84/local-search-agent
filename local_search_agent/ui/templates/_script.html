@@ -1198,7 +1198,11 @@ async function openConfig() {
     const s = await api('/settings/semantic');
     $('toggle-enable-semantic').checked        = !!s.enable_semantic;
     $('toggle-enable-query-expansion').checked = !!s.enable_query_expansion;
-    $('toggle-enable-link-graph').checked      = !!s.enable_link_graph;
+    // Populate semantic provider dropdown
+    const semProvider = s.semantic_provider || '';
+    $('sem-provider-select').value = semProvider;
+    // Populate semantic model dropdown for the saved provider
+    _populateSemModelDropdown(semProvider, s.semantic_model || '');
   } catch (e) { console.warn('Could not load semantic settings:', e); }
 
   // Load model list
@@ -1207,6 +1211,30 @@ async function openConfig() {
 
   $('modal-config').classList.remove('hidden');
 }
+
+/* Populate semantic model dropdown based on selected provider */
+function _populateSemModelDropdown(provider, currentModel) {
+  const sel = $('sem-model-select');
+  sel.innerHTML = '<option value="">Default</option>';
+  const models = provider ? (_allModels[provider] || []) : [];
+  models.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = m;
+    if (m === currentModel) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  if (!models.length && provider) {
+    const opt = document.createElement('option');
+    opt.disabled = true;
+    opt.textContent = 'No models — add via Model Manager';
+    sel.appendChild(opt);
+  }
+}
+
+$('sem-provider-select').addEventListener('change', () => {
+  _populateSemModelDropdown($('sem-provider-select').value, '');
+});
 
 $('btn-config').addEventListener('click', openConfig);
 $('btn-config-close').addEventListener('click', () => $('modal-config').classList.add('hidden'));
@@ -1224,7 +1252,8 @@ $('btn-semantic-save').addEventListener('click', async () => {
       body: JSON.stringify({
         enable_semantic:        $('toggle-enable-semantic').checked,
         enable_query_expansion: $('toggle-enable-query-expansion').checked,
-        enable_link_graph:      $('toggle-enable-link-graph').checked,
+        semantic_provider:      $('sem-provider-select').value,
+        semantic_model:         $('sem-model-select').value,
       }),
     });
     $('semantic-status').textContent = '\u2713 Saved';

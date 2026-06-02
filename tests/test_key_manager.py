@@ -475,7 +475,6 @@ class TestSemanticSettings:
             s = get_semantic_settings()
             assert s["enable_semantic"] is False
             assert s["enable_query_expansion"] is False
-            assert s["enable_link_graph"] is False
 
     def test_set_single_flag(self, tmp_path):
         with _patch_settings_path(tmp_path):
@@ -499,12 +498,10 @@ class TestSemanticSettings:
             set_all_semantic_settings(
                 enable_semantic=True,
                 enable_query_expansion=True,
-                enable_link_graph=False,
             )
             s = get_semantic_settings()
             assert s["enable_semantic"] is True
             assert s["enable_query_expansion"] is True
-            assert s["enable_link_graph"] is False
 
     def test_set_flag_persists_across_calls(self, tmp_path):
         with _patch_settings_path(tmp_path):
@@ -513,11 +510,9 @@ class TestSemanticSettings:
                 set_semantic_setting,
             )
 
-            set_semantic_setting("enable_link_graph", True)
             set_semantic_setting("enable_semantic", True)
             s = get_semantic_settings()
-            # Both should be persisted, not overwritten
-            assert s["enable_link_graph"] is True
+            # Should be persisted, not overwritten
             assert s["enable_semantic"] is True
 
     def test_unknown_setting_key_raises(self, tmp_path):
@@ -555,4 +550,3 @@ class TestSemanticSettings:
             s = get_semantic_settings()
             assert s["enable_semantic"] is True
             assert s["enable_query_expansion"] is False  # filled with default
-            assert s["enable_link_graph"] is False  # filled with default

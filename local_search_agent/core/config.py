@@ -65,14 +65,13 @@ class SearchAgentConfig:
     max_iterations       : Agent loop iteration cap.
     db_path              : SQLite database path.
 
-    Semantic search (Experimental)
+    Semantic search
     --------------------------------
     enable_semantic        : Run ConceptCompiler (A) + StructuralParser (B) at ingest.
     enable_query_expansion : Expand queries with synonyms before searching (C).
-    enable_link_graph      : Build cross-document same_topic links at ingest.
     semantic_model         : Override LLM model for concept compilation.
 
-    Access control (Experimental)
+    Access control
     --------------------------------
     enable_access_control  : Enforce Windows/LDAP access control on file endpoints.
     ldap_server            : LDAP server URL (e.g. "ldap://company.local").
@@ -108,7 +107,6 @@ class SearchAgentConfig:
     # --- Phase 5: Semantic search ---
     enable_semantic: bool = False
     enable_query_expansion: bool = False
-    enable_link_graph: bool = False
     semantic_model: Optional[str] = None
 
     # --- Phase 5: Access control ---
@@ -130,13 +128,17 @@ class SearchAgentConfig:
             self.index_name = self.workspace_name
         # Load semantic settings from settings.json if not explicitly set
         # (explicit means the caller passed a non-default value)
-        if not any([self.enable_semantic, self.enable_query_expansion, self.enable_link_graph]):
+        if not any([self.enable_semantic, self.enable_query_expansion]):
             from local_search_agent.core.key_manager import get_semantic_settings
 
             s = get_semantic_settings()
             self.enable_semantic = s["enable_semantic"]
             self.enable_query_expansion = s["enable_query_expansion"]
-            self.enable_link_graph = s["enable_link_graph"]
+            # Only set semantic_model override if not already explicitly provided
+            if s.get("semantic_model") and not self.semantic_model:
+                self.semantic_model = s["semantic_model"]
+            # Note: semantic_provider is stored in settings but never overwrites
+            # the main config.provider — it is only used by _get_enricher directly
 
     # ------------------------------------------------------------------
     # Accessors

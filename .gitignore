@@ -16,6 +16,7 @@ cmdgit.md
 test_logs.md
 ruff_logs.md
 .coverage
+diagnose_linkgraph.py
 
 # Python
 __pycache__/

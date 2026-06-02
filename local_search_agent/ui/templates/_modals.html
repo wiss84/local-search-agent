@@ -183,7 +183,7 @@
 
     <!-- Semantic tab -->
     <div class="settings-pane" id="settings-pane-semantic">
-      <p class="settings-hint">Semantic features add AI-powered metadata at ingest time. All are experimental and disabled by default.</p>
+      <p class="settings-hint">Semantic features add AI-powered metadata at ingest time. Disabled by default.</p>
 
       <div class="toggle-row">
         <div>
@@ -207,15 +207,22 @@
         </label>
       </div>
 
-      <div class="toggle-row">
-        <div>
-          <div class="toggle-label">Enable Link Graph</div>
-          <div class="toggle-desc">Builds cross-document topic links at ingest. Adds the <code>get_related_docs</code> tool to the agent.</div>
+      <div class="key-row" style="gap:10px">
+        <div class="key-provider-label">Semantic Model <span style="font-weight:400;color:var(--text-muted);font-size:11px">(optional override)</span></div>
+        <p style="font-size:11px;color:var(--text-muted);margin:0">Use a different provider and model for concept extraction at ingest time. Leave on <strong>Default</strong> to use the same model as the agent.</p>
+        <div class="key-input-wrap" style="gap:8px">
+          <select class="key-input" id="sem-provider-select" style="font-family:inherit;max-width:130px">
+            <option value="">Default</option>
+            <option value="google">Google</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="ollama">Ollama</option>
+          </select>
+          <select class="key-input" id="sem-model-select" style="font-family:var(--font-mono);font-size:11px;flex:1">
+            <option value="">Default</option>
+          </select>
         </div>
-        <label class="toggle-switch">
-          <input type="checkbox" id="toggle-enable-link-graph">
-          <span class="toggle-slider"></span>
-        </label>
+        <p style="font-size:10px;color:var(--text-muted);margin:0">&#8505; Add models first via the <strong>Model Manager</strong> tab &mdash; they will appear here automatically.</p>
       </div>
 
       <button class="key-btn-save" id="btn-semantic-save" style="align-self:flex-start;margin-top:4px">Save</button>

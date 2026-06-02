@@ -307,10 +307,11 @@ def models_file_path() -> str:
 # so CLI, UI, and Python API all read from the same source of truth.
 # ---------------------------------------------------------------------------
 
-_SEMANTIC_DEFAULTS: dict[str, bool] = {
+_SEMANTIC_DEFAULTS: dict = {
     "enable_semantic": False,
     "enable_query_expansion": False,
-    "enable_link_graph": False,
+    "semantic_provider": "",
+    "semantic_model": "",
 }
 
 
@@ -342,19 +343,21 @@ def _save_settings(settings: dict) -> None:
         json.dump(settings, f, indent=2)
 
 
-def get_semantic_settings() -> dict[str, bool]:
+def get_semantic_settings() -> dict:
     """
-    Return all three semantic feature flags.
+    Return semantic feature flags and model overrides.
 
     Returns
     -------
-    dict with keys: enable_semantic, enable_query_expansion, enable_link_graph
+    dict with keys: enable_semantic, enable_query_expansion,
+                    semantic_provider, semantic_model
     """
     s = _load_settings()
     return {
         "enable_semantic": bool(s.get("enable_semantic", False)),
         "enable_query_expansion": bool(s.get("enable_query_expansion", False)),
-        "enable_link_graph": bool(s.get("enable_link_graph", False)),
+        "semantic_provider": s.get("semantic_provider", ""),
+        "semantic_model": s.get("semantic_model", ""),
     }
 
 
@@ -364,7 +367,7 @@ def set_semantic_setting(key: str, value: bool) -> None:
 
     Parameters
     ----------
-    key   : One of: enable_semantic, enable_query_expansion, enable_link_graph
+    key   : One of: enable_semantic, enable_query_expansion
     value : True to enable, False to disable
     """
     if key not in _SEMANTIC_DEFAULTS:
@@ -379,14 +382,16 @@ def set_semantic_setting(key: str, value: bool) -> None:
 def set_all_semantic_settings(
     enable_semantic: bool,
     enable_query_expansion: bool,
-    enable_link_graph: bool,
+    semantic_provider: str = "",
+    semantic_model: str = "",
 ) -> None:
-    """Set all three semantic flags in one atomic write."""
+    """Set all semantic settings in one atomic write."""
     _save_settings(
         {
             "enable_semantic": bool(enable_semantic),
             "enable_query_expansion": bool(enable_query_expansion),
-            "enable_link_graph": bool(enable_link_graph),
+            "semantic_provider": semantic_provider.strip(),
+            "semantic_model": semantic_model.strip(),
         }
     )
 

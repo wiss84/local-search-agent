@@ -110,7 +110,18 @@ class ConceptCompiler:
 
         try:
             response = self._llm.invoke([HumanMessage(content=prompt)])
-            raw = response.content if isinstance(response.content, str) else str(response.content)
+            if isinstance(response.content, str):
+                raw = response.content
+            elif isinstance(response.content, list):
+                # Extract text from content blocks (skip thinking blocks)
+                raw = " ".join(
+                    block["text"] if isinstance(block, dict) else block.text
+                    for block in response.content
+                    if (isinstance(block, dict) and block.get("type") == "text")
+                    or (hasattr(block, "type") and block.type == "text")
+                )
+            else:
+                raw = str(response.content)
             return self._parse_response(raw, node.title)
         except Exception as e:
             logger.warning(
@@ -122,12 +133,28 @@ class ConceptCompiler:
 
     def _parse_response(self, raw: str, title: str) -> ConceptMetadata:
         """Parse LLM JSON response, stripping markdown fences if present."""
+        logger.debug("ConceptCompiler raw response for %r: %r", title, raw[:500])
+
         clean = re.sub(r"```(?:json)?\s*|\s*```", "", raw).strip()
+
+        # Strip surrounding single or double quotes some models wrap JSON in
+        if len(clean) >= 2 and (
+            (clean[0] == "'" and clean[-1] == "'") or (clean[0] == '"' and clean[-1] == '"')
+        ):
+            clean = clean[1:-1].strip()
+
+        # Fall back: extract first {...} block if there's still preamble text
+        if not clean.startswith("{"):
+            match = re.search(r"\{.*\}", clean, re.DOTALL)
+            if match:
+                logger.debug("ConceptCompiler: extracted JSON block from preamble for %r", title)
+                clean = match.group(0)
 
         try:
             data = json.loads(clean)
         except json.JSONDecodeError as e:
             logger.warning("ConceptCompiler: failed to parse JSON for %r: %s", title, e)
+            logger.warning("ConceptCompiler: cleaned string was: %r", clean[:300])
             return ConceptMetadata()
 
         def _str_list(val) -> list[str]:

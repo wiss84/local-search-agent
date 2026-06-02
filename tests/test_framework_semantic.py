@@ -5,7 +5,6 @@ Tests cover:
 - get_semantic_settings returns current config values
 - set_semantic_settings updates config in memory
 - set_semantic_settings persists to settings.json
-- set_semantic_settings rebuilds agent when enable_link_graph changes
 - set_semantic_settings does NOT rebuild agent when only other flags change
 - Round-trip: set then get returns same values
 - Settings survive framework restart (loaded from settings.json)
@@ -13,7 +12,7 @@ Tests cover:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -78,7 +77,6 @@ class TestGetSemanticSettings:
             result = fw.get_semantic_settings()
             assert "enable_semantic" in result
             assert "enable_query_expansion" in result
-            assert "enable_link_graph" in result
 
     def test_defaults_all_false(self, tmp_path):
         with (
@@ -90,7 +88,6 @@ class TestGetSemanticSettings:
             result = fw.get_semantic_settings()
             assert result["enable_semantic"] is False
             assert result["enable_query_expansion"] is False
-            assert result["enable_link_graph"] is False
 
     def test_reflects_config_values(self, tmp_path):
         with (
@@ -104,7 +101,6 @@ class TestGetSemanticSettings:
             result = fw.get_semantic_settings()
             assert result["enable_semantic"] is True
             assert result["enable_query_expansion"] is True
-            assert result["enable_link_graph"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -123,11 +119,9 @@ class TestSetSemanticSettings:
             fw.set_semantic_settings(
                 enable_semantic=True,
                 enable_query_expansion=True,
-                enable_link_graph=False,
             )
             assert fw.config.enable_semantic is True
             assert fw.config.enable_query_expansion is True
-            assert fw.config.enable_link_graph is False
 
     def test_persists_to_settings_json(self, tmp_path):
         with (
@@ -139,14 +133,12 @@ class TestSetSemanticSettings:
             fw.set_semantic_settings(
                 enable_semantic=True,
                 enable_query_expansion=False,
-                enable_link_graph=True,
             )
             from local_search_agent.core.key_manager import get_semantic_settings
 
             saved = get_semantic_settings()
             assert saved["enable_semantic"] is True
             assert saved["enable_query_expansion"] is False
-            assert saved["enable_link_graph"] is True
 
     def test_round_trip_set_then_get(self, tmp_path):
         with (
@@ -158,64 +150,10 @@ class TestSetSemanticSettings:
             fw.set_semantic_settings(
                 enable_semantic=True,
                 enable_query_expansion=True,
-                enable_link_graph=True,
             )
             result = fw.get_semantic_settings()
-            assert result == {
-                "enable_semantic": True,
-                "enable_query_expansion": True,
-                "enable_link_graph": True,
-            }
-
-    def test_rebuilds_agent_when_link_graph_enabled(self, tmp_path):
-        with (
-            _patch_settings_path(tmp_path),
-            _patch_keys_path(tmp_path),
-            _patch_models_path(tmp_path),
-        ):
-            fw = _make_framework(tmp_path)
-            fw.config.enable_link_graph = False
-            fw._agent = MagicMock()  # simulate existing agent
-            fw.set_semantic_settings(
-                enable_semantic=False,
-                enable_query_expansion=False,
-                enable_link_graph=True,  # changed
-            )
-            assert fw._agent is None  # should have been cleared
-
-    def test_rebuilds_agent_when_link_graph_disabled(self, tmp_path):
-        with (
-            _patch_settings_path(tmp_path),
-            _patch_keys_path(tmp_path),
-            _patch_models_path(tmp_path),
-        ):
-            fw = _make_framework(tmp_path)
-            fw.config.enable_link_graph = True
-            fw._agent = MagicMock()
-            fw.set_semantic_settings(
-                enable_semantic=False,
-                enable_query_expansion=False,
-                enable_link_graph=False,  # changed
-            )
-            assert fw._agent is None
-
-    def test_does_not_rebuild_agent_when_link_graph_unchanged(self, tmp_path):
-        with (
-            _patch_settings_path(tmp_path),
-            _patch_keys_path(tmp_path),
-            _patch_models_path(tmp_path),
-        ):
-            fw = _make_framework(tmp_path)
-            fw.config.enable_link_graph = False
-            mock_agent = MagicMock()
-            fw._agent = mock_agent
-            fw.set_semantic_settings(
-                enable_semantic=True,  # changed
-                enable_query_expansion=True,  # changed
-                enable_link_graph=False,  # unchanged
-            )
-            # Agent should NOT be cleared since link_graph didn't change
-            assert fw._agent is mock_agent
+            assert result["enable_semantic"] is True
+            assert result["enable_query_expansion"] is True
 
     def test_all_false_disables_everything(self, tmp_path):
         with (
@@ -225,11 +163,12 @@ class TestSetSemanticSettings:
         ):
             fw = _make_framework(tmp_path)
             # First enable everything
-            fw.set_semantic_settings(True, True, True)
+            fw.set_semantic_settings(enable_semantic=True, enable_query_expansion=True)
             # Then disable everything
-            fw.set_semantic_settings(False, False, False)
+            fw.set_semantic_settings(enable_semantic=False, enable_query_expansion=False)
             result = fw.get_semantic_settings()
-            assert all(v is False for v in result.values())
+            assert result["enable_semantic"] is False
+            assert result["enable_query_expansion"] is False
 
     def test_settings_survive_framework_restart(self, tmp_path):
         """Settings written to settings.json should be picked up by a new framework instance."""
@@ -242,7 +181,6 @@ class TestSetSemanticSettings:
             fw1.set_semantic_settings(
                 enable_semantic=True,
                 enable_query_expansion=False,
-                enable_link_graph=False,
             )
 
             # Create a new framework instance — should load from settings.json

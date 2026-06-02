@@ -17,7 +17,7 @@ local-search [--db <path>] [--log-level LEVEL] <command> [subcommand] [options]
 
 ## config
 
-Manage saved API keys. Keys are stored in your user config directory outside the project — never in the repo.
+Manage saved API keys, models, and semantic settings. All settings are stored in your user config directory outside the project — never in the repo.
 
 ### config set-key
 
@@ -60,7 +60,7 @@ Removes the saved key for a provider.
 local-search config add-model --provider <provider> --model-name <name>
 ```
 
-Adds a model name for a provider. Stored in `models.json` in your user config directory. The model will appear in the UI sidebar dropdown and is available to `local-search query --model`.
+Adds a model name for a provider. Stored in `models.json` in your user config directory. The model will appear in the UI sidebar dropdown and is available to `local-search query --model`. Models added here also appear in the Semantic Model dropdown in the UI settings.
 
 ```bash
 local-search config add-model --provider ollama --model-name gemma4:e2b
@@ -86,24 +86,34 @@ Lists all saved model names per provider.
 
 ### config set-semantic
 
-Enable or disable a semantic search feature. Settings are stored in `settings.json` in your user config directory and are shared across CLI, UI, and Python API.
+Configure semantic search features. All flags are optional and can be combined in one call. Settings are stored in `settings.json` in your user config directory and are shared across CLI, UI, and Python API.
 
 ```bash
-local-search config set-semantic <feature> <value>
+local-search config set-semantic [--enable true|false] [--query-expansion true|false] [--provider <provider>] [--model <model>]
 ```
 
-| Feature | Description |
-|---------|-------------|
-| `semantic` | ConceptCompiler + StructuralParser at ingest time |
-| `query-expansion` | Expand queries with synonyms at search time |
-| `link-graph` | Build cross-document topic links at ingest |
-
-`<value>` accepts: `true`, `false`, `on`, `off`, `enable`, `disable`, `1`, `0`, `yes`, `no`
+| Flag | Description |
+|------|-------------|
+| `--enable` | Enable or disable ConceptCompiler + StructuralParser at ingest time |
+| `--query-expansion` | Enable or disable query expansion with synonyms at search time |
+| `--provider` | Provider to use for concept extraction (overrides main provider). Use `none` to reset. |
+| `--model` | Model to use for concept extraction (overrides main model). Use `none` to reset. |
 
 ```bash
-local-search config set-semantic semantic true
-local-search config set-semantic query-expansion on
-local-search config set-semantic link-graph false
+# Enable semantic indexing and query expansion
+local-search config set-semantic --enable true --query-expansion true
+
+# Use a cheaper model for concept extraction
+local-search config set-semantic --provider google --model gemma-4-26b-a4b-it
+
+# Set everything in one call
+local-search config set-semantic --enable true --query-expansion true --provider google --model gemma-4-26b-a4b-it
+
+# Use a local Ollama model for concept extraction
+local-search config set-semantic --provider ollama --model llama3.2
+
+# Reset semantic model back to the main agent model
+local-search config set-semantic --model none --provider none
 ```
 
 ### config show-semantic
@@ -112,7 +122,7 @@ local-search config set-semantic link-graph false
 local-search config show-semantic
 ```
 
-Shows the current state of all three semantic feature flags.
+Shows the current state of all semantic settings including the model override.
 
 ### config show
 
@@ -126,7 +136,7 @@ Shows everything in one view: version, saved API keys (masked), models per provi
 
 ## setup
 
-Download the Meilisearch binary for the current platform. Runs automatically on first use; call this explicitly to pre-download (In case of a bug).
+Download the Meilisearch binary for the current platform. Runs automatically on first use; call this explicitly to pre-download.
 
 ```bash
 local-search setup [--force]
@@ -150,7 +160,7 @@ local-search ui [options]
 |--------|---------|-------------|
 | `--host` | `127.0.0.1` | Dashboard API server host. Also reads `LSA_HOST`. |
 | `--port` | `8765` | Dashboard API server port. Also reads `LSA_PORT`. |
-| `--db` | user config dir | SQLite database path. Overrides the default location for this session. Also reads `LSA_DB_PATH`. |
+| `--db` | user config dir | SQLite database path. Also reads `LSA_DB_PATH`. |
 | `--provider` | `google` | LLM provider: `google`, `ollama`, `openai`, `anthropic`. Also reads `LSA_PROVIDER`. |
 | `--model` | `gemma-4-31b-it` | Model name. Also reads `LSA_MODEL`. |
 | `--meili-url` | `http://localhost:7700` | Meilisearch URL. Also reads `MEILI_URL`. |
@@ -170,14 +180,9 @@ Manage workspaces (named collections of documents).
 local-search workspace create <name> <dir>
 ```
 
-Registers a new workspace pointing to a document directory. Creates sync tracking records in MetadataDB. Uses the database at the path specified by `--db` (global flag) or the default user config location.
-
 ```bash
 local-search workspace create finance "C:\Shares\FinanceDocs"
 local-search workspace create hr ./hr_policies
-local-search workspace create legal /mnt/legal_repository
-
-# Use a custom database location
 local-search --db D:\mydata\search.db workspace create finance "C:\Shares\FinanceDocs"
 ```
 
@@ -187,24 +192,15 @@ local-search --db D:\mydata\search.db workspace create finance "C:\Shares\Financ
 local-search workspace list
 ```
 
-Lists all registered workspaces with their document directories.
-
 ### workspace delete
 
 ```bash
 local-search workspace delete <name> [--wipe]
 ```
 
-Removes a workspace registration from SQLite. Does not delete your files.
-
 | Option | Description |
 |--------|-------------|
 | `--wipe` | Also delete all documents from the Meilisearch index. |
-
-```bash
-local-search workspace delete old_project           # Remove registration only
-local-search workspace delete old_project --wipe    # Remove registration + wipe index
-```
 
 ---
 
@@ -225,23 +221,17 @@ local-search ingest --workspace <name> --dirs <dir> [dir ...] [options]
 | `--force` | off | Re-index all files, ignoring delta logic |
 | `--wipe` | off | Delete the index and all DB records, then force full re-ingest |
 
-`--force` re-indexes all files but keeps existing index data. `--wipe` deletes everything first, then starts from scratch.
-
 ```bash
 local-search ingest --workspace finance --dirs "C:\Shares\FinanceDocs"
-local-search ingest --workspace finance --dirs "C:\dir1" "C:\dir2"
-local-search ingest --workspace finance --dirs "C:\Shares\FinanceDocs" --force
+local-search ingest --workspace finance --dirs "C:\dir1" "C:\dir2" --force
 local-search ingest --workspace finance --dirs "C:\Shares\FinanceDocs" --wipe
-
-# Custom database location
-local-search --db D:\mydata\search.db ingest --workspace finance --dirs "C:\Shares\FinanceDocs"
 ```
 
 ---
 
 ## serve
 
-Start the FastAPI file server that serves documents via HTTP for the agent.
+Start the FastAPI file server.
 
 ```bash
 local-search serve --workspace <name> [options]
@@ -252,23 +242,15 @@ local-search serve --workspace <name> [options]
 | `--workspace` | `default` | Workspace to serve |
 | `--host` | `127.0.0.1` | Server bind address |
 | `--port` | `8000` | Server port |
-| `--meili-url` | `http://localhost:7700` | Meilisearch URL |
-| `--meili-key` | `local_search_master_key` | Meilisearch master key |
 | `--dirs` | (none) | If provided, ingest these directories before starting |
 | `--scheduler` | off | Start incremental sync scheduler alongside the server |
-| `--interval` | `15` | Scheduler interval in minutes (only with `--scheduler`) |
-
-```bash
-local-search serve --workspace finance
-local-search serve --workspace finance --scheduler --interval 15
-local-search serve --workspace finance --dirs "C:\Shares\FinanceDocs" --scheduler --interval 15
-```
+| `--interval` | `15` | Scheduler interval in minutes |
 
 ---
 
 ## query
 
-Ask the agent a question about your indexed documents.
+Ask the agent a question.
 
 ```bash
 local-search query [question] --workspace <name> [options]
@@ -281,30 +263,20 @@ Omit `question` to enter interactive mode.
 | `--workspace` | `default` | Workspace to query |
 | `--provider` | `google` | LLM provider: `google`, `ollama`, `openai`, `anthropic` |
 | `--model` | `gemma-4-31b-it` | Model name |
-| `--api-key` | (from saved keys) | Override the API key for this query only. Resolution order: this flag → saved keys (`config set-key`) → env var. |
-| `--meili-url` | `http://localhost:7700` | Meilisearch URL |
-| `--meili-key` | `local_search_master_key` | Meilisearch master key |
+| `--api-key` | (from saved keys) | Override the API key for this query only |
 | `--max-iterations` | `10` | Maximum agent loop iterations |
 | `--top-k` | `5` | Number of search results per query |
 
 ```bash
 local-search query "What was the AWS spend in Q3?" --workspace finance --provider google
-local-search query "Vacation policy?" --workspace hr --provider ollama --model mistral
-local-search query --workspace finance --provider google   # Interactive mode
-
-# Custom database location
-local-search --db D:\mydata\search.db query "What is the budget?" --workspace finance
+local-search query --workspace finance   # Interactive mode
 ```
 
 ---
 
 ## scheduler
 
-Manage the incremental sync scheduler.
-
 ### scheduler status
-
-Show which workspaces are scheduled and their next run times.
 
 ```bash
 local-search scheduler status
@@ -312,49 +284,23 @@ local-search scheduler status
 
 ### scheduler start
 
-Start the scheduler as a foreground blocking process.
-
 ```bash
-local-search scheduler start --workspace <name> [options]
+local-search scheduler start --workspace <name> [--interval <minutes>]
 ```
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--workspace` | `default` | Primary workspace to register |
-| `--dirs` | (none) | Directories to register for this workspace |
-| `--meili-url` | `http://localhost:7700` | Meilisearch URL |
-| `--meili-key` | `local_search_master_key` | Meilisearch master key |
-| `--interval` | `15` | Sync interval in minutes |
-
-Press Ctrl+C to stop.
-
 ### scheduler trigger
-
-Force an immediate sync for a workspace outside the normal schedule.
 
 ```bash
 local-search scheduler trigger --workspace <name> [--force]
 ```
 
-| Option | Description |
-|--------|-------------|
-| `--force` | Force full re-index (ignore delta logic) |
-
 ---
 
 ## health
 
-Show index health and freshness across all registered workspaces.
-
 ```bash
 local-search health [--stale-threshold <minutes>]
 ```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--stale-threshold` | `30` | Minutes after which a workspace is considered stale |
-
-**Status values:**
 
 | Icon | Status | Meaning |
 |------|--------|---------|

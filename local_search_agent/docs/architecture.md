@@ -77,7 +77,6 @@ START → call_llm → route → call_tools → call_llm → ... → END
 **Tools:**
 - `search_local_index` — BM25 search against Meilisearch
 - `fetch_local_url` — retrieves full document text from file server
-- `get_related_docs` — finds related documents via link graph (opt-in)
 
 **Features:**
 - Multi-provider: Google, Ollama, OpenAI, Anthropic
@@ -127,8 +126,6 @@ Optional features that enhance BM25 search without vectors.
 - **ConceptCompiler** — LLM-driven concept/synonym extraction at ingest (one call per document's chunk\part)
 - **StructuralParser** — pure regex extraction of headings, definitions, references, key-values
 - **QueryExpander** — expands user query at search time using concepts from the index or LLM
-- **LinkGraph** — SQLite cross-document relationship store; same_topic links built at ingest
-- **SemanticEnricher** — orchestrates A + B + link graph
 
 ## Key Design Decisions
 

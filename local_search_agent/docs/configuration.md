@@ -91,14 +91,17 @@ Ollama always uses `None` — no key required.
 |-----------|---------|-------------|
 | `db_path` | user config dir | Path to the SQLite database that stores workspace registrations, document metadata, sync history, and chat sessions. Defaults to `local_search_agent.db` in your OS user config directory — the same location as `keys.json`, `models.json`, and `settings.json`. This means the database survives `pip install --upgrade` and is independent of your working directory. |
 
-### Semantic Search (Experimental)
+### Semantic Search
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `enable_semantic` | `False` | Run ConceptCompiler and StructuralParser during ingestion. Adds one LLM call per document. |
 | `enable_query_expansion` | `False` | Expand user queries with synonyms at search time. |
-| `enable_link_graph` | `False` | Build cross-document same-topic links during ingestion. |
-| `semantic_model` | `None` | Use a different model for concept compilation. Defaults to the main `model_name`. |
+| `semantic_model` | `None` | Override the model used for concept extraction at ingest time. Defaults to the main `model_name`. |
+
+The `semantic_model` field only controls which model runs concept extraction — the main agent still uses `model_name` for answering queries. This lets you use a cheaper or faster model for ingest without affecting query quality.
+
+The semantic provider is configured separately via `local-search config set-semantic --provider` (CLI), the UI Semantic Search pane, or by setting `semantic_provider` in `settings.json`. It is not a field on `SearchAgentConfig` directly — the provider override is read from the shared `settings.json` at ingest time.
 
 ### Access Control (Experimental)
 

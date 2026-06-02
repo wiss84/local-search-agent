@@ -1,5 +1,5 @@
 """
-Unit tests for Phase 5: semantic layer, link graph, access control.
+Unit tests for Phase 5: semantic layer, access control.
 
 All LLM calls are mocked. No live services needed.
 
@@ -7,7 +7,6 @@ Covers:
 - ConceptCompiler: JSON parsing, malformed output fallback, truncation
 - StructuralParser: headings, definitions, tables, references
 - QueryExpander: LLM-based and index-based expansion
-- LinkGraph: add/query links, batch insert, same_topic auto-build
 - SemanticEnricher: end-to-end enrichment on DocumentNode
 - AccessControlMiddleware: 401 on missing header, 403 on denied, 200 on allowed
 """
@@ -19,7 +18,6 @@ from unittest.mock import MagicMock
 from local_search_agent.core.document_node import DocumentNode
 from local_search_agent.semantic.concept_compiler import ConceptCompiler, ConceptMetadata
 from local_search_agent.semantic.enricher import SemanticEnricher
-from local_search_agent.semantic.link_graph import RELATION_SAME_TOPIC, LinkGraph
 from local_search_agent.semantic.query_expander import QueryExpander
 from local_search_agent.semantic.structural_parser import StructuralParser
 
@@ -223,84 +221,6 @@ class TestQueryExpander:
 
 
 # ---------------------------------------------------------------------------
-# LinkGraph
-# ---------------------------------------------------------------------------
-
-
-class TestLinkGraph:
-    def test_add_and_get_link(self, tmp_path):
-        graph = LinkGraph(db_path=str(tmp_path / "test.db"))
-        graph.add_link("doc_a", "doc_b", "references", weight=0.9)
-        related = graph.get_related("doc_a")
-        assert len(related) == 1
-        assert related[0]["target_doc_id"] == "doc_b"
-        assert related[0]["relation_type"] == "references"
-        assert abs(related[0]["weight"] - 0.9) < 0.01
-
-    def test_self_link_ignored(self, tmp_path):
-        graph = LinkGraph(db_path=str(tmp_path / "test.db"))
-        graph.add_link("doc_a", "doc_a", "references")
-        assert graph.get_related("doc_a") == []
-
-    def test_duplicate_link_ignored(self, tmp_path):
-        graph = LinkGraph(db_path=str(tmp_path / "test.db"))
-        graph.add_link("doc_a", "doc_b", "references")
-        graph.add_link("doc_a", "doc_b", "references")
-        assert graph.get_link_count("doc_a") == 1
-
-    def test_weight_clamped_to_0_1(self, tmp_path):
-        graph = LinkGraph(db_path=str(tmp_path / "test.db"))
-        graph.add_link("doc_a", "doc_b", weight=5.0)
-        related = graph.get_related("doc_a")
-        assert related[0]["weight"] <= 1.0
-
-    def test_filter_by_relation_type(self, tmp_path):
-        graph = LinkGraph(db_path=str(tmp_path / "test.db"))
-        graph.add_link("doc_a", "doc_b", "references")
-        graph.add_link("doc_a", "doc_c", "same_topic")
-        refs = graph.get_related("doc_a", relation_type="references")
-        assert len(refs) == 1
-        assert refs[0]["target_doc_id"] == "doc_b"
-
-    def test_min_weight_filter(self, tmp_path):
-        graph = LinkGraph(db_path=str(tmp_path / "test.db"))
-        graph.add_link("doc_a", "doc_b", weight=0.3)
-        graph.add_link("doc_a", "doc_c", weight=0.8)
-        high_weight = graph.get_related("doc_a", min_weight=0.5)
-        assert len(high_weight) == 1
-        assert high_weight[0]["target_doc_id"] == "doc_c"
-
-    def test_delete_links_for_doc(self, tmp_path):
-        graph = LinkGraph(db_path=str(tmp_path / "test.db"))
-        graph.add_link("doc_a", "doc_b")
-        graph.add_link("doc_a", "doc_c")
-        graph.delete_links_for_doc("doc_a")
-        assert graph.get_link_count("doc_a") == 0
-
-    def test_build_same_topic_links(self, tmp_path):
-        graph = LinkGraph(db_path=str(tmp_path / "test.db"))
-
-        # Create nodes with shared concepts
-        node_a = MagicMock()
-        node_a.doc_id = "doc_a"
-        node_a.concepts = ["cloud costs", "AWS", "Q3 finance", "infra"]
-
-        node_b = MagicMock()
-        node_b.doc_id = "doc_b"
-        node_b.concepts = ["cloud costs", "AWS", "Q3 finance", "budget"]
-
-        node_c = MagicMock()
-        node_c.doc_id = "doc_c"
-        node_c.concepts = ["hr policy", "recruitment"]  # no overlap
-
-        pairs = graph.build_same_topic_links([node_a, node_b, node_c], min_shared_concepts=3)
-        assert pairs == 1  # only a↔b share 3 concepts
-
-        related_a = graph.get_related("doc_a", relation_type=RELATION_SAME_TOPIC)
-        assert any(r["target_doc_id"] == "doc_b" for r in related_a)
-
-
-# ---------------------------------------------------------------------------
 # SemanticEnricher
 # ---------------------------------------------------------------------------
 
@@ -336,33 +256,6 @@ class TestSemanticEnricher:
         enricher.enrich_batch(nodes)
         for i, node in enumerate(nodes):
             assert f"Section {i}" in node.synonyms
-
-    def test_link_graph_built_for_shared_concepts(self, tmp_path):
-        llm = _mock_llm(
-            '{"concepts": ["cloud", "AWS", "infra", "budget"], "synonyms": [], "entities": [], "summary": ""}'
-        )
-        enricher = SemanticEnricher(
-            llm=llm,
-            enable_structural=False,
-            enable_link_graph=True,
-            db_path=str(tmp_path / "test.db"),
-            min_shared_concepts=3,
-        )
-        nodes = [
-            _make_node(tmp_path, name=f"doc{i}.txt", text=f"AWS cloud infra budget doc {i}")
-            for i in range(2)
-        ]
-        # Pre-set concepts (normally set by compiler)
-        for node in nodes:
-            node.concepts = ["cloud", "AWS", "infra", "budget"]
-
-        enricher.enrich_batch(nodes)
-
-        from local_search_agent.semantic.link_graph import LinkGraph
-
-        graph = LinkGraph(db_path=str(tmp_path / "test.db"))
-        related = graph.get_related(nodes[0].doc_id)
-        assert any(r["target_doc_id"] == nodes[1].doc_id for r in related)
 
 
 # ---------------------------------------------------------------------------

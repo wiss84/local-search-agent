@@ -155,7 +155,8 @@ class ModelDeleteRequest(BaseModel):
 class SemanticSettingsRequest(BaseModel):
     enable_semantic: bool
     enable_query_expansion: bool
-    enable_link_graph: bool
+    semantic_provider: str = ""
+    semantic_model: str = ""
 
 
 class LangSmithRequest(BaseModel):
@@ -416,37 +417,27 @@ def build_ui_router(app_state) -> APIRouter:
         """
         Update semantic feature flags at runtime.
         Persists to settings.json so CLI, UI, and Python API all share state.
-        Toggling enable_link_graph also forces agent rebuild.
         """
         from local_search_agent.core.key_manager import set_all_semantic_settings
 
-        prev_link_graph = app_state.config.enable_link_graph
-
         app_state.config.enable_semantic = body.enable_semantic
         app_state.config.enable_query_expansion = body.enable_query_expansion
-        app_state.config.enable_link_graph = body.enable_link_graph
+        app_state.config.semantic_model = body.semantic_model or None
 
-        # Persist to settings.json — single source of truth
         set_all_semantic_settings(
             enable_semantic=body.enable_semantic,
             enable_query_expansion=body.enable_query_expansion,
-            enable_link_graph=body.enable_link_graph,
+            semantic_provider=body.semantic_provider,
+            semantic_model=body.semantic_model,
         )
-
-        # Rebuild agent if link_graph toggle changed (tool list changes)
-        if prev_link_graph != body.enable_link_graph:
-            app_state._agent = None
-            logger.info(
-                "enable_link_graph changed to %s — agent will rebuild on next query.",
-                body.enable_link_graph,
-            )
 
         return JSONResponse(
             {
                 "ok": True,
                 "enable_semantic": app_state.config.enable_semantic,
                 "enable_query_expansion": app_state.config.enable_query_expansion,
-                "enable_link_graph": app_state.config.enable_link_graph,
+                "semantic_provider": body.semantic_provider,
+                "semantic_model": body.semantic_model,
             }
         )
 
@@ -976,6 +967,7 @@ def _run_ingest(app_state, workspace: str, force: bool = False, wipe: bool = Fal
             meili_master_key=app_state.config.meili_master_key,
             provider=app_state.config.provider,
             db_path=app_state.config.db_path,
+            semantic_model=app_state.config.semantic_model,
         )
         mc = MeilisearchClient(
             url=ws_config.meilisearch_url,

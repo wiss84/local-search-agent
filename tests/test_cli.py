@@ -279,29 +279,24 @@ def _patch_settings_path(tmp_path):
 class TestConfigSemanticCommands:
     def test_set_semantic_enable(self, tmp_path):
         with _patch_settings_path(tmp_path):
-            code, out, err = _run(["config", "set-semantic", "semantic", "true"])
+            code, out, err = _run(["config", "set-semantic", "--enable", "true"])
             assert code == 0
             assert "enabled" in out.lower()
 
     def test_set_semantic_disable(self, tmp_path):
         with _patch_settings_path(tmp_path):
-            code, out, err = _run(["config", "set-semantic", "semantic", "false"])
+            code, out, err = _run(["config", "set-semantic", "--enable", "false"])
             assert code == 0
             assert "disabled" in out.lower()
 
     def test_set_semantic_query_expansion(self, tmp_path):
         with _patch_settings_path(tmp_path):
-            code, out, err = _run(["config", "set-semantic", "query-expansion", "on"])
-            assert code == 0
-
-    def test_set_semantic_link_graph(self, tmp_path):
-        with _patch_settings_path(tmp_path):
-            code, out, err = _run(["config", "set-semantic", "link-graph", "yes"])
+            code, out, err = _run(["config", "set-semantic", "--query-expansion", "on"])
             assert code == 0
 
     def test_set_semantic_persists(self, tmp_path):
         with _patch_settings_path(tmp_path):
-            _run(["config", "set-semantic", "semantic", "true"])
+            _run(["config", "set-semantic", "--enable", "true"])
             from local_search_agent.core.key_manager import get_semantic_settings
 
             s = get_semantic_settings()
@@ -313,7 +308,6 @@ class TestConfigSemanticCommands:
             assert code == 0
             assert "enable_semantic" in out
             assert "enable_query_expansion" in out
-            assert "enable_link_graph" in out
 
     def test_show_semantic_shows_on_off(self, tmp_path):
         with _patch_settings_path(tmp_path):

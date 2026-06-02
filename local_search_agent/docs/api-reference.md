@@ -240,35 +240,51 @@ Return scheduler state: `running`, `scheduled_jobs`, next run times.
 framework.set_semantic_settings(
     enable_semantic: bool,
     enable_query_expansion: bool,
-    enable_link_graph: bool,
 )
 ```
-Update all three semantic feature flags at runtime. Persists to `settings.json` in the user config directory so the settings are shared across CLI, UI, and future Python API sessions. If `enable_link_graph` changes, the agent tool list is rebuilt on the next query.
+Update semantic feature flags at runtime. Persists to `settings.json` in the user config directory so the settings are shared across CLI, UI, and future Python API sessions.
 
 ```python
-settings = framework.get_semantic_settings() -> dict[str, bool]
+settings = framework.get_semantic_settings() -> dict
 ```
-Return the current semantic feature flags as a dict with keys `enable_semantic`, `enable_query_expansion`, `enable_link_graph`.
+Return the current semantic feature flags as a dict with keys `enable_semantic`, `enable_query_expansion`.
 
 **Example:**
 
 ```python
 # Check current state
 print(framework.get_semantic_settings())
-# {'enable_semantic': False, 'enable_query_expansion': False, 'enable_link_graph': False}
+# {'enable_semantic': False, 'enable_query_expansion': False}
 
 # Enable concept extraction and query expansion
 framework.set_semantic_settings(
     enable_semantic=True,
     enable_query_expansion=True,
-    enable_link_graph=False,
 )
 
 # Re-ingest to apply semantic indexing to existing documents
 framework.ingest_and_index(force=True)
 ```
 
-> **Note:** `enable_semantic` and `enable_link_graph` only affect documents ingested *after* the flag is enabled. Existing documents in the index do not gain concept or link metadata retroactively. Use `force=True` on the next ingest to reprocess them.
+To use a different model or provider for concept extraction, set it via the CLI or UI before ingesting:
+
+```bash
+# Use a cheaper model for concept extraction only
+local-search config set-semantic --provider google --model gemma-4-26b-a4b-it
+```
+
+Or pass `semantic_model` directly in `SearchAgentConfig`:
+
+```python
+config = SearchAgentConfig(
+    provider="google",
+    model_name="gemma-4-31b-it",     # used for agent queries
+    enable_semantic=True,
+    semantic_model="gemma-4-26b-a4b-it",  # used for concept extraction only
+)
+```
+
+> **Note:** `enable_semantic` only affects documents ingested *after* the flag is enabled. Use `force=True` on the next ingest to reprocess existing documents.
 
 ---
 
@@ -306,10 +322,9 @@ config = SearchAgentConfig(
 | `max_iterations` | `int` | `50` | Agent loop iteration cap |
 | `max_retries` | `int` | `5` | HTTP retry count for agent tools |
 | `db_path` | `str` | `local_search_agent.db` | SQLite database path |
-| `enable_semantic` | `bool` | `False` | *(Experimental)* Run ConceptCompiler + StructuralParser at ingest |
-| `enable_query_expansion` | `bool` | `False` | *(Experimental)* Expand queries with synonyms at search time |
-| `enable_link_graph` | `bool` | `False` | *(Experimental)* Build cross-document topic links at ingest |
-| `semantic_model` | `str \| None` | `None` | *(Experimental)* Override model for concept compilation |
+| `enable_semantic` | `bool` | `False` | Run ConceptCompiler + StructuralParser at ingest |
+| `enable_query_expansion` | `bool` | `False` | Expand queries with synonyms at search time |
+| `semantic_model` | `str \| None` | `None` | Override model for concept extraction only. Defaults to `model_name`. The semantic provider is set separately via CLI/UI. |
 | `enable_access_control` | `bool` | `False` | *(Experimental)* Enforce Windows/LDAP access control |
 | `ldap_server` | `str \| None` | `None` | *(Experimental)* LDAP server URL |
 

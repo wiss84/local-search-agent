@@ -143,4 +143,4 @@ print(response["answer"])
 - [Python API Reference](api-reference.md) — full API documentation
 - [Configuration Guide](configuration.md) — all config options
 - [Multi-Workspace Guide](multi-workspace.md) — managing multiple document collections
-- [Semantic Search](semantic-search.md) — optional AI-powered search enhancement (Experimental)
+- [Semantic Search](semantic-search.md) — optional AI-powered search enhancement

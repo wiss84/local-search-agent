@@ -11,7 +11,6 @@ Phase 2: Ingestion pipeline (PDF/DOCX/HTML/XLSX), text cleaner, Meilisearch inde
 Phase 3: LangGraph agent loop, multi-provider LLM, search + fetch tools
 Phase 4: Multi-workspace isolation, APScheduler incremental sync, IndexMonitor
 Phase 5: Semantic search (ConceptCompiler + StructuralParser + QueryExpander),
-         LinkGraph cross-document relationships, Windows/LDAP access control
 """
 
 from local_search_agent.agent.agent import LocalSearchAgent
@@ -25,7 +24,6 @@ from local_search_agent.search.meilisearch_client import MeilisearchClient
 from local_search_agent.search.query_builder import QueryBuilder
 from local_search_agent.semantic.concept_compiler import ConceptCompiler, ConceptMetadata
 from local_search_agent.semantic.enricher import SemanticEnricher
-from local_search_agent.semantic.link_graph import LinkGraph
 from local_search_agent.semantic.query_expander import QueryExpander
 from local_search_agent.semantic.structural_parser import StructuralMetadata, StructuralParser
 from local_search_agent.tools.search_tool import LocalSearchTool, ToolResult
@@ -61,6 +59,5 @@ __all__ = [
     "StructuralParser",
     "StructuralMetadata",
     "QueryExpander",
-    "LinkGraph",
     "SemanticEnricher",
 ]

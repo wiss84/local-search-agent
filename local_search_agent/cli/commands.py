@@ -96,7 +96,7 @@ def cmd_config_set_key(args: argparse.Namespace) -> None:
 
     try:
         set_key(args.provider, args.key)
-        print(f"✓ API key saved for provider '{args.provider}'.")
+        print(f"\u2713 API key saved for provider '{args.provider}'.")
         print(f"  Stored at: {keys_file_path()}")
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -109,7 +109,7 @@ def cmd_config_delete_key(args: argparse.Namespace) -> None:
 
     deleted = delete_key(args.provider)
     if deleted:
-        print(f"✓ API key for '{args.provider}' removed.")
+        print(f"\u2713 API key for '{args.provider}' removed.")
     else:
         print(f"No saved key found for provider '{args.provider}'.")
 
@@ -167,24 +167,44 @@ def cmd_config_list_models(args: argparse.Namespace) -> None:
 
 
 def cmd_config_set_semantic(args: argparse.Namespace) -> None:
-    """Enable or disable a semantic feature flag."""
-    from local_search_agent.core.key_manager import set_semantic_setting, settings_file_path
+    """Configure semantic features: toggles and model/provider overrides."""
+    from local_search_agent.core.key_manager import (
+        get_semantic_settings,
+        set_all_semantic_settings,
+        settings_file_path,
+    )
 
-    key_map = {
-        "semantic": "enable_semantic",
-        "query-expansion": "enable_query_expansion",
-        "link-graph": "enable_link_graph",
-    }
-    setting_key = key_map[args.feature]
-    value = args.value.lower() in ("true", "1", "on", "yes", "enable")
-    try:
-        set_semantic_setting(setting_key, value)
-        state = "enabled" if value else "disabled"
-        print(f"\u2713 {args.feature} {state}.")
+    current = get_semantic_settings()
+    changed = False
+
+    if args.enable is not None:
+        current["enable_semantic"] = args.enable
+        changed = True
+        print(f"\u2713 semantic indexing {'enabled' if args.enable else 'disabled'}.")
+
+    if args.query_expansion is not None:
+        current["enable_query_expansion"] = args.query_expansion
+        changed = True
+        print(f"\u2713 query expansion {'enabled' if args.query_expansion else 'disabled'}.")
+
+    if args.provider is not None:
+        val = "" if args.provider.lower() in ("none", "default") else args.provider
+        current["semantic_provider"] = val
+        changed = True
+        print(f"\u2713 semantic provider set to {(val or '(default - uses main provider)'):!r}.")
+
+    if args.model is not None:
+        val = "" if args.model.lower() in ("none", "default") else args.model
+        current["semantic_model"] = val
+        changed = True
+        print(f"\u2713 semantic model set to {(val or '(default - uses main model)'):!r}.")
+
+    if changed:
+        set_all_semantic_settings(**current)
         print(f"  Stored at: {settings_file_path()}")
-    except ValueError as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        sys.exit(1)
+    else:
+        print("Nothing changed. Use --enable, --query-expansion, --provider, or --model flags.")
+        print("  Run 'local-search config show-semantic' to see current settings.")
 
 
 def cmd_config_show_semantic(args: argparse.Namespace) -> None:
@@ -197,11 +217,14 @@ def cmd_config_show_semantic(args: argparse.Namespace) -> None:
     print(
         f"  {'enable_query_expansion':<28} {'ON' if settings['enable_query_expansion'] else 'off'}"
     )
-    print(f"  {'enable_link_graph':<28} {'ON' if settings['enable_link_graph'] else 'off'}")
+    sem_provider = settings.get("semantic_provider") or "(default - uses main provider)"
+    sem_model = settings.get("semantic_model") or "(default - uses main model)"
+    print(f"  {'semantic_provider':<28} {sem_provider}")
+    print(f"  {'semantic_model':<28} {sem_model}")
 
 
 def cmd_config_show(args: argparse.Namespace) -> None:
-    """Show all current config — keys, models, semantic settings, LangSmith."""
+    """Show all current config -- keys, models, semantic settings, LangSmith."""
     from local_search_agent.core.constants import __version__
     from local_search_agent.core.key_manager import (
         get_langsmith,
@@ -235,7 +258,10 @@ def cmd_config_show(args: argparse.Namespace) -> None:
     print(f"\nSemantic Settings  ({settings_file_path()}):")
     s = get_semantic_settings()
     for key, val in s.items():
-        print(f"  {key:<28} {'ON' if val else 'off'}")
+        if isinstance(val, bool):
+            print(f"  {key:<28} {'ON' if val else 'off'}")
+        else:
+            print(f"  {key:<28} {val or '(default)'}")
 
     # LangSmith
     print("\nLangSmith Tracing:")
@@ -308,7 +334,7 @@ def cmd_workspace_create(args: argparse.Namespace) -> None:
     mdb = MetadataDB(db_path=args.db)
     wm.create_workspace(name=args.name, document_dir=args.dir)
     mdb.upsert_sync_job(workspace=args.name)
-    print(f"Workspace {args.name!r} created → {args.dir}")
+    print(f"Workspace {args.name!r} created -> {args.dir}")
 
 
 def cmd_workspace_list(args: argparse.Namespace) -> None:
@@ -397,7 +423,6 @@ def cmd_query(args: argparse.Namespace) -> None:
     )
     framework = SearchAgentFramework(config)
 
-    # ── Single question mode ──────────────────────────────────────────
     if args.question:
         try:
             from rich.console import Console
@@ -415,7 +440,6 @@ def cmd_query(args: argparse.Namespace) -> None:
         _print_answer(response["answer"], response["iterations_used"], response["truncated"])
         return
 
-    # ── Interactive multi-turn mode ───────────────────────────────────
     _print_banner()
 
     try:
@@ -519,7 +543,7 @@ def cmd_scheduler_start(args: argparse.Namespace) -> None:
 
 
 def cmd_scheduler_status(args: argparse.Namespace) -> None:
-    """Show scheduler status — which workspaces are scheduled and next run times."""
+    """Show scheduler status -- which workspaces are scheduled and next run times."""
     from local_search_agent.core.config import SearchAgentConfig
     from local_search_agent.core.framework import SearchAgentFramework
 
@@ -532,7 +556,7 @@ def cmd_scheduler_status(args: argparse.Namespace) -> None:
         return
 
     jobs = status.get("scheduled_jobs", [])
-    print(f"Scheduler running — {len(jobs)} job(s)")
+    print(f"Scheduler running -- {len(jobs)} job(s)")
     print("-" * 60)
     for job in jobs:
         print(
@@ -575,7 +599,7 @@ def cmd_health(args: argparse.Namespace) -> None:
     monitor = IndexMonitor(metadata_db=mdb, stale_threshold_minutes=args.stale_threshold)
     summary = monitor.get_health_summary()
 
-    print(f"Index Health Summary — {summary.total_workspaces} workspace(s)")
+    print(f"Index Health Summary -- {summary.total_workspaces} workspace(s)")
     print("-" * 60)
     print(f"  Healthy      : {summary.healthy}")
     print(f"  Stale        : {summary.stale}")
@@ -592,11 +616,11 @@ def cmd_health(args: argparse.Namespace) -> None:
     for ws in summary.workspaces:
         age_str = f"{ws.age_minutes:.0f}m ago" if ws.age_minutes is not None else "never"
         status_icon = {
-            "healthy": "✓",
-            "stale": "⚠",
-            "never_synced": "○",
-            "error": "✗",
-            "running": "↻",
+            "healthy": "\u2713",
+            "stale": "\u26a0",
+            "never_synced": "\u25cb",
+            "error": "\u2717",
+            "running": "\u21bb",
         }.get(ws.status, "?")
         print(
             f"  {status_icon} {ws.workspace:<25} "
@@ -605,11 +629,11 @@ def cmd_health(args: argparse.Namespace) -> None:
             f"last_sync={age_str}"
         )
         if ws.last_error:
-            print(f"    └─ Error: {ws.last_error}")
+            print(f"    \u2514\u2500 Error: {ws.last_error}")
 
     if not summary.all_healthy:
         print(
-            "\n⚠  Some workspaces need attention. "
+            "\n\u26a0  Some workspaces need attention. "
             "Run 'local-search scheduler trigger --workspace <name>' to sync manually."
         )
 
@@ -644,7 +668,7 @@ def cmd_ui(args: argparse.Namespace) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="local-search",
-        description="Local Search Agent — deterministic, auditable local document RAG.",
+        description="Local Search Agent -- deterministic, auditable local document RAG.",
     )
     from local_search_agent.core.config import _default_db_path
 
@@ -659,7 +683,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    # ── config ──────────────────────────────────────────────────────────
+    # -- config --------------------------------------------------------------
     p_config = sub.add_parser("config", help="Manage configuration (API keys etc.).")
     config_sub = p_config.add_subparsers(dest="config_command", required=True)
 
@@ -698,19 +722,47 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_cfg_list_models.set_defaults(func=cmd_config_list_models)
 
+    # set-semantic: all flags, can be combined in one call
     p_cfg_semantic = config_sub.add_parser(
         "set-semantic",
-        help="Enable or disable a semantic feature (experimental).",
+        help="Configure semantic search settings.",
+        description=(
+            "Configure semantic search features. All flags are optional and can be combined.\n\n"
+            "Examples:\n"
+            "  local-search config set-semantic --enable true\n"
+            "  local-search config set-semantic --provider google --model gemma-4-26b-a4b-it\n"
+            "  local-search config set-semantic --enable true --query-expansion true "
+            "--provider google --model gemma-4-26b-a4b-it\n"
+            "  local-search config set-semantic --model none  # reset to main model"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_cfg_semantic.add_argument(
-        "feature",
-        choices=["semantic", "query-expansion", "link-graph"],
-        help="Feature to configure: semantic | query-expansion | link-graph",
+        "--enable",
+        type=lambda v: v.lower() in ("true", "1", "on", "yes", "enable"),
+        metavar="true|false",
+        default=None,
+        help="Enable or disable semantic indexing (ConceptCompiler + StructuralParser).",
     )
     p_cfg_semantic.add_argument(
-        "value",
-        choices=["true", "false", "on", "off", "enable", "disable", "1", "0", "yes", "no"],
-        help="true/false, on/off, enable/disable, 1/0, yes/no",
+        "--query-expansion",
+        type=lambda v: v.lower() in ("true", "1", "on", "yes", "enable"),
+        metavar="true|false",
+        default=None,
+        dest="query_expansion",
+        help="Enable or disable query expansion at search time.",
+    )
+    p_cfg_semantic.add_argument(
+        "--provider",
+        default=None,
+        choices=["google", "openai", "anthropic", "ollama", "none"],
+        help="Provider to use for semantic indexing. 'none' resets to main provider.",
+    )
+    p_cfg_semantic.add_argument(
+        "--model",
+        default=None,
+        metavar="MODEL_NAME",
+        help="Model to use for semantic indexing. 'none' resets to main model.",
     )
     p_cfg_semantic.set_defaults(func=cmd_config_set_semantic)
 
@@ -724,7 +776,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_cfg_show.set_defaults(func=cmd_config_show)
 
-    # ── setup ───────────────────────────────────────────────────────────
+    # -- setup ---------------------------------------------------------------
     p_setup = sub.add_parser(
         "setup",
         help="Download the Meilisearch binary for this platform (run once after install).",
@@ -736,7 +788,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_setup.set_defaults(func=cmd_setup)
 
-    # ── serve ──────────────────────────────────────────────────────────
+    # -- serve ---------------------------------------------------------------
     p_serve = sub.add_parser("serve", help="Start the FastAPI file server.")
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8000)
@@ -752,7 +804,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_serve.set_defaults(func=cmd_serve)
 
-    # ── workspace ──────────────────────────────────────────────────────
+    # -- workspace -----------------------------------------------------------
     p_ws = sub.add_parser("workspace", help="Manage workspaces.")
     ws_sub = p_ws.add_subparsers(dest="ws_command", required=True)
 
@@ -771,7 +823,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ws_delete.set_defaults(func=cmd_workspace_delete)
 
-    # ── ingest ─────────────────────────────────────────────────────────
+    # -- ingest --------------------------------------------------------------
     p_ingest = sub.add_parser("ingest", help="Ingest and index documents into Meilisearch.")
     p_ingest.add_argument("--workspace", default="default")
     p_ingest.add_argument("--dirs", nargs="+", required=True, metavar="DIR")
@@ -787,7 +839,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ingest.set_defaults(func=cmd_ingest)
 
-    # ── query ──────────────────────────────────────────────────────────
+    # -- query ---------------------------------------------------------------
     p_query = sub.add_parser("query", help="Ask the agent a question.")
     p_query.add_argument("question", nargs="?", help="Question to ask. Omit for interactive mode.")
     p_query.add_argument("--workspace", default="default")
@@ -802,7 +854,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_query.add_argument("--top-k", type=int, default=5)
     p_query.set_defaults(func=cmd_query)
 
-    # ── scheduler ──────────────────────────────────────────────────────
+    # -- scheduler -----------------------------------------------------------
     p_sched = sub.add_parser("scheduler", help="Manage the incremental sync scheduler.")
     sched_sub = p_sched.add_subparsers(dest="sched_command", required=True)
 
@@ -829,7 +881,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sched_trigger.add_argument("--force", action="store_true", help="Force full re-index.")
     p_sched_trigger.set_defaults(func=cmd_scheduler_trigger)
 
-    # ── health ─────────────────────────────────────────────────────────
+    # -- health --------------------------------------------------------------
     p_health = sub.add_parser("health", help="Show index health across all workspaces.")
     p_health.add_argument(
         "--stale-threshold",
@@ -839,7 +891,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_health.set_defaults(func=cmd_health)
 
-    # ── ui ─────────────────────────────────────────────────────────────
+    # -- ui ------------------------------------------------------------------
     p_ui = sub.add_parser("ui", help="Open the desktop dashboard.")
     p_ui.add_argument(
         "--host",

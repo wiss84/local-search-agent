@@ -82,7 +82,10 @@ local-search config set-key --provider google --key YOUR_KEY
 # Or use Ollama for a fully local, zero-cost setup (no key needed)
 # Install from https://ollama.com 
 # Download any model that support function calling and system instructions: 
-`ollama pull gemma4:e2b` (7.2GB) or `ollama pull gemma4:e4b` (9.6GB)
+`ollama pull gemma4:e2b` (7.2GB) 
+`ollama pull gemma4:e4b` (9.6GB) 
+`ollama pull nemotron-3-nano:4b` (2.8GB Highly recommended)
+
 ```
 
 ---
@@ -228,7 +231,7 @@ See the [Python API Reference](https://github.com/wiss84/local-search-agent/blob
 | [Configuration](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/configuration.md) | All config options and patterns |
 | [Ingestion](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/ingestion.md) | How ingestion works, supported formats, chunking, scheduler |
 | [Multi-Workspace](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/multi-workspace.md) | Managing multiple document collections |
-| [Semantic Search](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/semantic-search.md) | Experimental: concept extraction, query expansion, link graph |
+| [Semantic Search](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/semantic-search.md) | Experimental: concept extraction, query expansion |
 | [Troubleshooting](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/troubleshooting.md) | Common issues and fixes |
 
 ---

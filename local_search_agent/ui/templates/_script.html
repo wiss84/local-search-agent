@@ -787,12 +787,12 @@ function _startIngestPoll(workspace, force) {
         const label = total > 0 ? `${processed} / ${total} files (${pct}%)` : 'Scanning…';
         statusEl.innerHTML = `<span class="ingest-spinner"></span> Indexing: ${label}`;
         toastMsg.textContent = total > 0
-          ? `${force ? 'Force ingest' : 'Ingest'}: ${processed}/${total} files (${pct}%) — ${elapsed_s}s`
+          ? `${force ? 'Force ingest' : 'Ingest'}: ${processed}/${total} files (${pct}%) — ${ws.elapsed_fmt || elapsed_s + 's'}`
           : `${force ? 'Force ingest' : 'Ingest'}: scanning files…`;
 
       } else if (status === 'done') {
         clearInterval(_ingestPollTimer); _ingestPollTimer = null;
-        const summary = `${total} files → ${indexed} chunks${failed > 0 ? `, ${failed} failed` : ''} — ${elapsed_s}s`;
+        const summary = `${total} files → ${indexed} chunks${failed > 0 ? `, ${failed} failed` : ''} — ${ws.elapsed_fmt || elapsed_s + 's'}`;
         statusEl.className = 'done';
         statusEl.innerHTML = `✓ ${summary}`;
         toastMsg.textContent = `✓ ${force ? 'Force ingest' : 'Ingest'} complete: ${summary}`;

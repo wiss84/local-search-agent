@@ -57,7 +57,7 @@ def build_search_tool(meili_client, config):
     def search_local_index(
         query: str,
         file_type: Optional[str] = None,
-        top_k: int = 5,
+        top_k: int = 8,
         date_filter: Optional[str] = None,
     ) -> str:
         """
@@ -70,7 +70,7 @@ def build_search_tool(meili_client, config):
         Args:
             query: Short keyword query (3-6 words). Focus on key terms, not full sentences.
             file_type: Optional filter. One of: "pdf", "docx", "html", "xlsx", "txt", "md".
-            top_k: Number of results to return (default 5, max 20).
+            top_k: Number of results to return (default 8, max 20).
             date_filter: Optional recency filter. One of: "1d" (last 24h), "3d" (last 3 days),
                 "7d" (last 7 days), "1m" (last month), "6m" (last 6 months),
                 "1y" (last year), "all" (no filter, default).
@@ -118,21 +118,18 @@ def build_search_tool(meili_client, config):
                 "Try different keywords or a broader query."
             )
 
-        expansion_note = (
-            f"  (query expanded to: {effective_query!r})\n" if effective_query != query else ""
-        )
-        lines = [f"Found {len(results)} result(s) for query: {query!r}\n{expansion_note}"]
+        lines = [f"Found {len(results)} result(s) for query: {query!r}\n"]
 
         for i, r in enumerate(results, 1):
             doc_id = r["doc_id"]
-            text_url = config.text_url(doc_id)
             docs_url = config.docs_url(doc_id)
+            summary = r.get("summary", "")
 
             lines.append(
                 f"[{i}] {r['title']} ({r['file_type'].upper()})\n"
                 f"    doc_id   : {doc_id}\n"
-                f"    snippet  : {r['snippet'] or '(no snippet available)'}\n"
-                f"    text_url : {text_url}\n"
+                + (f"    summary  : {summary}\n" if summary else "")
+                + f"    snippet  : {r['snippet'] or '(no snippet available)'}\n"
                 f"    docs_url : {docs_url}\n"
                 f"    modified : {r['modified_at']}\n"
             )

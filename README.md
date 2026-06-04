@@ -188,6 +188,33 @@ See the [Python API Reference](https://github.com/wiss84/local-search-agent/blob
 
 ---
 
+## Optional: Faster OCR for Scanned PDFs (Tesseract)
+
+By default, scanned or image-based PDFs are processed using RapidOCR. Installing Tesseract enables a faster OCR path (~5 second per page vs. minutes without it).
+
+Digitally-created PDFs (with a text layer) are never affected — they use direct text extraction and skip OCR entirely.
+
+**Windows**
+
+Download and run the installer from https://github.com/UB-Mannheim/tesseract/wiki  
+Make sure **"Add Tesseract to the system PATH"** is checked during installation.
+
+**Linux**
+```bash
+sudo apt install tesseract-ocr        # Ubuntu / Debian
+sudo dnf install tesseract             # Fedora / RHEL
+sudo pacman -S tesseract               # Arch
+```
+
+**macOS**
+```bash
+brew install tesseract
+```
+
+After installation, restart the application — Tesseract is detected automatically. If it's not found, ingestion continues normally using RapidOCR with no errors.
+
+---
+
 ## Supported File Types
 
 | Format | Extension |

@@ -252,32 +252,18 @@ class TestDeltaLogic:
 
 
 class TestBatchLogic:
-    def test_batch_size_one_calls_meili_per_file(self, config, wm, mock_meili, tmp_workspace):
-        """With batch_size=1 each document triggers a separate Meilisearch call."""
+    def test_per_file_flush_calls_meili_per_file(self, config, wm, mock_meili, tmp_workspace):
+        """Each parsed file triggers its own Meilisearch call (per-file flush)."""
         parser = _txt_parser()
         pipeline = IngestionPipeline(
             config=config,
             workspace_manager=wm,
             meili_client=mock_meili,
             parsers=[parser],
-            batch_size=1,
         )
         stats = pipeline.run(force=True)
+        # Each successfully parsed file flushes immediately → one call per file
         assert mock_meili.index_documents.call_count == stats.files_indexed
-
-    def test_large_batch_single_meili_call(self, config, wm, mock_meili, tmp_workspace):
-        """With batch_size > total files, all docs are flushed in one call."""
-        parser = _txt_parser()
-        pipeline = IngestionPipeline(
-            config=config,
-            workspace_manager=wm,
-            meili_client=mock_meili,
-            parsers=[parser],
-            batch_size=1000,
-        )
-        stats = pipeline.run(force=True)
-        assert mock_meili.index_documents.call_count == 1
-        assert stats.files_indexed == 2
 
     def test_meili_failure_increments_failed(self, config, wm, mock_meili, tmp_workspace):
         """
@@ -360,4 +346,6 @@ class TestIngestStats:
         stats = pipeline.run(force=True)
 
         assert len(stats.errors) >= 1
-        assert any("Boom" in e or "file.txt" in e for e in stats.errors)
+        # errors now store file paths, not error messages
+        assert all(isinstance(e, str) for e in stats.errors)
+        assert any(".txt" in e for e in stats.errors)

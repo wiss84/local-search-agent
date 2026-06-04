@@ -86,6 +86,13 @@ def chunk_document(node: DocumentNode) -> list[DocumentNode]:
     -------
     A list of DocumentNodes.  If no chunking is needed, returns [node]
     unchanged.  Otherwise returns only the chunks (original node excluded).
+
+    Memory safety
+    -------------
+    If chunking fails with a MemoryError (low-RAM systems), the function
+    retries with progressively halved CHUNK_TARGET_CHARS and CHUNK_MAX_CHARS.
+    If all retries fail, the original node is returned as-is (un-chunked)
+    so ingestion continues rather than crashing.
     """
     text = node.text
 
@@ -104,25 +111,57 @@ def chunk_document(node: DocumentNode) -> list[DocumentNode]:
         )
         return [node]
 
-    if _is_table_document(text):
-        logger.debug("Using table chunking for %r", node.title)
-        raw_chunks = _chunk_table(text)
-    else:
-        logger.debug("Using sliding-window chunking for %r", node.title)
-        raw_chunks = _chunk_sliding(text)
+    # --- Memory-safe retry loop ---
+    target = CHUNK_TARGET_CHARS
+    max_c = CHUNK_MAX_CHARS
+    max_attempts = 4  # original + 3 halving attempts
 
-    raw_chunks = [c.strip() for c in raw_chunks if c.strip()]
+    for attempt in range(max_attempts):
+        try:
+            if _is_table_document(text):
+                if attempt == 0:
+                    logger.debug("Using table chunking for %r", node.title)
+                raw_chunks = _chunk_table(text)
+            else:
+                if attempt == 0:
+                    logger.debug("Using sliding-window chunking for %r", node.title)
+                raw_chunks = _chunk_sliding(text, target_chars=target, max_chars=max_c)
 
-    if len(raw_chunks) <= 1:
-        return [node]
+            raw_chunks = [c.strip() for c in raw_chunks if c.strip()]
 
-    total = len(raw_chunks)
-    logger.info("Chunked %r into %d parts", node.title, total)
+            if len(raw_chunks) <= 1:
+                return [node]
 
-    return [
-        _make_chunk_node(node, chunk_text, idx + 1, total)
-        for idx, chunk_text in enumerate(raw_chunks)
-    ]
+            total = len(raw_chunks)
+            logger.info("Chunked %r into %d parts", node.title, total)
+
+            return [
+                _make_chunk_node(node, chunk_text, idx + 1, total)
+                for idx, chunk_text in enumerate(raw_chunks)
+            ]
+
+        except MemoryError:
+            target = target // 2
+            max_c = max_c // 2
+            logger.warning(
+                "Chunking %r ran out of memory (attempt %d/%d). "
+                "Retrying with reduced chunk size: target=%d max=%d.",
+                node.title,
+                attempt + 1,
+                max_attempts,
+                target,
+                max_c,
+            )
+
+    # All retries failed — return original node un-chunked so ingestion continues
+    logger.error(
+        "Chunking %r failed after %d attempts due to MemoryError. "
+        "Indexing as a single document. Consider reducing CHUNK_TARGET_CHARS "
+        "in constants.py for low-memory environments.",
+        node.title,
+        max_attempts,
+    )
+    return [node]
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +292,9 @@ def _find_break_points(text: str) -> list[tuple[int, int]]:
     return sorted(bps.items())  # sorted by position ascending
 
 
-def _chunk_sliding(text: str) -> list[str]:
+def _chunk_sliding(
+    text: str, target_chars: int = CHUNK_TARGET_CHARS, max_chars: int = CHUNK_MAX_CHARS
+) -> list[str]:
     """
     Accumulate text into chunks using a sliding window with overlap.
 
@@ -269,12 +310,12 @@ def _chunk_sliding(text: str) -> list[str]:
     bp_positions: list[int] = sorted(bp_map)
 
     chunks: list[str] = []
-    start = 0  # current chunk start in original text
-    overlap_prefix = ""  # tail of previous chunk
+    start = 0
+    overlap_prefix = ""
 
     while start < len(text):
-        target_end = start + CHUNK_TARGET_CHARS
-        hard_end = start + CHUNK_MAX_CHARS
+        target_end = start + target_chars
+        hard_end = start + max_chars
 
         if target_end >= len(text):
             # Everything remaining fits — take it all

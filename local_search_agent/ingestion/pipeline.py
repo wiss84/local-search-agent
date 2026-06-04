@@ -34,8 +34,6 @@ from local_search_agent.workspace.workspace_manager import WorkspaceManager
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_BATCH_SIZE = 100
-
 
 @dataclass
 class IngestStats:
@@ -47,7 +45,11 @@ class IngestStats:
     skipped: int = 0
     failed: int = 0
     duration_s: float = 0.0
-    errors: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)  # failed file paths
+
+    def failed_files(self) -> list[str]:
+        """Return list of file paths that failed (basenames for display)."""
+        return self.errors
 
     def __str__(self) -> str:
         return (
@@ -92,13 +94,11 @@ class IngestionPipeline:
         workspace_manager: WorkspaceManager,
         meili_client,
         parsers: Optional[list[BaseParser]] = None,
-        batch_size: int = _DEFAULT_BATCH_SIZE,
     ):
         self._config = config
         self._wm = workspace_manager
         self._meili = meili_client
         self._parsers = parsers or _build_default_parsers()
-        self._batch_size = batch_size
         self._enricher = None  # Lazy init (Phase 5)
 
     # ------------------------------------------------------------------
@@ -118,7 +118,6 @@ class IngestionPipeline:
         """
         stats = IngestStats()
         start = time.monotonic()
-        batch: list[DocumentNode] = []
 
         # First pass: count total eligible files so the UI can show X/N
         all_files: list[str] = []
@@ -143,26 +142,14 @@ class IngestionPipeline:
 
             nodes = self._parse_file(file_path, stats)
             if nodes:
-                batch.extend(nodes)
+                self._enrich_batch(nodes)
+                self._flush_batch(nodes, stats)
                 stats.files_indexed += 1
 
             if progress_callback:
                 progress_callback(
                     stats.files_indexed, stats.skipped, stats.failed, stats.total, file_path
                 )
-
-            if len(batch) >= self._batch_size:
-                self._enrich_batch(batch)
-                self._flush_batch(batch, stats)
-                batch.clear()
-                if progress_callback:
-                    progress_callback(
-                        stats.files_indexed, stats.skipped, stats.failed, stats.total, file_path
-                    )
-
-        if batch:
-            self._enrich_batch(batch)
-            self._flush_batch(batch, stats)
 
         stats.duration_s = time.monotonic() - start
         logger.info("Ingestion complete: %s", stats)
@@ -254,19 +241,20 @@ class IngestionPipeline:
         try:
             node = parser.parse(source_path=file_path, workspace=self._config.workspace_name)
             return chunk_document(node)
-        except FileNotFoundError as e:
+        except FileNotFoundError:
+            logger.error("File not found (deleted mid-ingestion?): %s", file_path)
             stats.failed += 1
-            stats.errors.append(str(e))
+            stats.errors.append(file_path)
             return []
         except ParserError as e:
             logger.error("Parser error for %s: %s", file_path, e)
             stats.failed += 1
-            stats.errors.append(str(e))
+            stats.errors.append(file_path)
             return []
         except Exception as e:
             logger.exception("Unexpected error parsing %s: %s", file_path, e)
             stats.failed += 1
-            stats.errors.append(f"Unexpected error for {file_path}: {e}")
+            stats.errors.append(file_path)
             return []
 
     def _flush_batch(self, batch: list[DocumentNode], stats: IngestStats) -> None:

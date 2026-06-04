@@ -69,6 +69,7 @@ class DocumentNode:
     indexed_at: str = field(default_factory=_local_now_iso)
     concepts: list[str] = field(default_factory=list)
     synonyms: list[str] = field(default_factory=list)
+    summary: str = ""
 
     # ------------------------------------------------------------------
     # Factory helpers
@@ -91,6 +92,7 @@ class DocumentNode:
         title: Optional[str] = None,
         concepts: Optional[list[str]] = None,
         synonyms: Optional[list[str]] = None,
+        summary: str = "",
     ) -> "DocumentNode":
         """
         Convenience constructor: derive all metadata from the file path.
@@ -103,6 +105,7 @@ class DocumentNode:
         title       : Override title (defaults to filename stem).
         concepts    : Optional concept tags.
         synonyms    : Optional synonym strings.
+        summary     : Optional 2-3 sentence summary from semantic enrichment.
         """
         abs_path = os.path.abspath(source_path)
         stem = os.path.splitext(os.path.basename(abs_path))[0]
@@ -119,6 +122,7 @@ class DocumentNode:
             modified_at=_file_mtime_iso(abs_path),
             concepts=concepts or [],
             synonyms=synonyms or [],
+            summary=summary,
         )
 
     # ------------------------------------------------------------------

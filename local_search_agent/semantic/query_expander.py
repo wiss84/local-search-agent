@@ -175,19 +175,20 @@ class QueryExpander:
             logger.warning("Index-based expansion search failed: %s", e)
             return query
 
-        # Collect synonyms from matched documents
-        all_synonyms: list[str] = []
+        # Collect synonyms and concepts from matched documents
+        all_terms: list[str] = []
         for r in results:
-            all_synonyms.extend(r.get("concepts", []))
+            all_terms.extend(r.get("synonyms", []))
+            all_terms.extend(r.get("concepts", []))
 
-        if not all_synonyms:
+        if not all_terms:
             return query
 
         # Filter: only add terms not already in the query
         query_lower = query.lower()
         new_terms = [
             s
-            for s in dict.fromkeys(all_synonyms)  # deduplicate
+            for s in dict.fromkeys(all_terms)  # deduplicate
             if s.lower() not in query_lower and len(s) > 2
         ][:8]  # cap additions
 

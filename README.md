@@ -19,7 +19,7 @@ Point it at a folder. Ask a question. The agent searches your documents, reads t
 
 ## Why not RAG?
 
-Traditional RAG (Retrieval-Augmented Generation) has a fundamental problem: it converts your documents into embeddings and stores them in a vector database. That means:
+Traditional RAG (Retrieval-Augmented-Generation) has a fundamental problem: it converts your documents into embeddings and stores them in a vector database. That means:
 
 - **Stale indexes** — embeddings go out of date silently. You never know if the agent is reading your latest documents or a six-month-old snapshot
 - **Black-box retrieval** — you can't see why a document was retrieved or not. Debugging poor answers is guesswork

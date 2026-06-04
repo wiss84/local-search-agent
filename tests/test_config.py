@@ -68,7 +68,7 @@ class TestDefaults:
 
     def test_default_top_k(self, tmp_path):
         cfg = _make_config(tmp_path)
-        assert cfg.top_k == 5
+        assert cfg.top_k == 8
 
     def test_default_max_iterations(self, tmp_path):
         cfg = _make_config(tmp_path)

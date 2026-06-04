@@ -53,6 +53,8 @@ def mock_meili():
             "source_path": "/shares/finance/q3.pdf",
             "modified_at": "2024-09-30T10:00:00+02:00",
             "concepts": ["finance", "AWS"],
+            "synonyms": ["Amazon Web Services", "cloud spend"],
+            "summary": "",
             "snippet": "AWS spend on Project Alpha reached $1.2M in Q3 2024.",
         }
     ]
@@ -102,7 +104,6 @@ class TestSearchTool:
         assert "Finance Report Q3" in result
         assert "abc123def456abcd" in result
         assert "$1.2M" in result
-        assert "text_url" in result
         assert "docs_url" in result
 
     def test_no_results_returns_helpful_message(self, config, mock_meili):

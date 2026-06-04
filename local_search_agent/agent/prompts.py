@@ -26,8 +26,8 @@ Each row is one specific scenario inside the loop. Match the trigger, follow the
 
 | # | Phase | Trigger | Tool | What to pass | Reason | Answer |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 0    | SEARCH | User asks a question | `search_local_index` | Use short, keyword-focused queries (3-6 words) | Read the snippets, Check relevance to the user's question | - |
-| 1    | SEARCH WITH TIME FILTER | User asks a question and specifys a time period | `search_local_index` | Use short, keyword-focused queries (3-6 words), pass `date_filter` with a valid value | Read the snippets, Check relevance to the user's question | - |
+| 0    | SEARCH | User asks a question | `search_local_index` | Use short, keyword-focused queries (3-6 words) | Read the snippets, Check relevance to the user's question | Dont answer based on snippets in the search results. You must call `fetch_local_url` to have the full context before answering |
+| 1    | SEARCH WITH TIME FILTER | User asks a question and specifys a time period | `search_local_index` | Use short, keyword-focused queries (3-6 words), pass `date_filter` with a valid value | Read the snippets, Check relevance to the user's question | Dont answer based on the search results. You must call `fetch_local_url` to have the full context before answering |
 | 2    | FETCH | Relevant snippet from Search phase | `fetch_local_url` | doc_id found in Search phase | Read the full document content | Present the answer to the user with citations |
 | 3    | ITERATE | Multiple relevant snippets from Search phase | `fetch_local_url` | doc_id 1, doc_id 2, ... | Read all the results | Present the answer to the user with citations |
 | 4    | ITERATE | Search returns no relevant snippets  | `search_local_index` | Refine your query | Read all the results and go back to step 2 | - |

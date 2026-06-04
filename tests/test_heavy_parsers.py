@@ -397,12 +397,38 @@ class TestPDFParser:
     """
 
     def _patch_docling(self, markdown: str):
-        """Return a context manager that patches Docling inside pdf_parser."""
+        """Return a context manager that patches the ONNX converter and native text extraction."""
         mock_class, mock_converter = _make_docling_mock(markdown)
-        return patch(
-            "local_search_agent.ingestion.parsers.pdf_parser._get_converter",
-            return_value=mock_converter,
-        )
+
+        # Patch _get_onnx_converter to return the mock converter directly
+        # Also patch PyMuPDF native text extraction to return empty string
+        # so the code falls through to the ONNX path
+        import contextlib
+        from unittest.mock import patch as _patch
+
+        @contextlib.contextmanager
+        def _multi_patch():
+            with (
+                _patch(
+                    "local_search_agent.ingestion.parsers.pdf_parser._get_onnx_converter",
+                    return_value=mock_converter,
+                ),
+                _patch(
+                    "local_search_agent.ingestion.parsers.pdf_parser._extract_native_text_pymupdf",
+                    return_value="",
+                ),
+                _patch(
+                    "local_search_agent.ingestion.parsers.pdf_parser._get_tesseract_converter",
+                    return_value=None,
+                ),
+                _patch(
+                    "local_search_agent.ingestion.parsers.pdf_parser._count_pdf_pages",
+                    return_value=1,
+                ),
+            ):
+                yield
+
+        return _multi_patch()
 
     def test_basic_text_extracted(self, tmp_path):
         f = tmp_path / "report.pdf"
@@ -441,9 +467,23 @@ class TestPDFParser:
         mock_converter = MagicMock()
         mock_converter.convert.side_effect = RuntimeError("Docling internal error")
 
-        with patch(
-            "local_search_agent.ingestion.parsers.pdf_parser._get_converter",
-            return_value=mock_converter,
+        with (
+            patch(
+                "local_search_agent.ingestion.parsers.pdf_parser._get_onnx_converter",
+                return_value=mock_converter,
+            ),
+            patch(
+                "local_search_agent.ingestion.parsers.pdf_parser._extract_native_text_pymupdf",
+                return_value="",
+            ),
+            patch(
+                "local_search_agent.ingestion.parsers.pdf_parser._get_tesseract_converter",
+                return_value=None,
+            ),
+            patch(
+                "local_search_agent.ingestion.parsers.pdf_parser._count_pdf_pages",
+                return_value=1,
+            ),
         ):
             from local_search_agent.ingestion.parsers.pdf_parser import PDFParser
 

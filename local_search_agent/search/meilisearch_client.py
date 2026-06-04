@@ -278,6 +278,8 @@ class MeilisearchClient:
                     "source_path",
                     "modified_at",
                     "concepts",
+                    "synonyms",
+                    "summary",
                 ],
                 attributes_to_highlight=[],
                 filter=filter_expr,
@@ -305,8 +307,10 @@ class MeilisearchClient:
                     "source_path": hit.get("source_path", ""),
                     "modified_at": hit.get("modified_at", ""),
                     "concepts": hit.get("concepts", []),
+                    "synonyms": hit.get("synonyms", []),
+                    "summary": hit.get("summary", ""),
                     "snippet": snippet,
-                    "score": 0.0,  # Meilisearch CE does not expose BM25 scores
+                    "score": 0.0,
                 }
             )
 

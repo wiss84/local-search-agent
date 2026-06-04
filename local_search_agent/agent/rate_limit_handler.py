@@ -89,7 +89,7 @@ _GOOGLE_RATE_ERRORS = tuple(
 _GOOGLE_LIMITS = {
     "gemini": {
         "requests_per_minute": 15,
-        "tokens_per_minute": 250_000,
+        "tokens_per_minute": 250_000,  # free-tier TPM enforced
         "requests_per_day": 500,
     },
     "gemma-4": {
@@ -337,6 +337,28 @@ class RateLimitHandler:
     # Public API
     # ------------------------------------------------------------------
 
+    def _user_friendly_error(self, e: Exception) -> str:
+        """
+        Convert a raw API exception into a clean user-facing message.
+        Only called after all retries are exhausted.
+        """
+        msg = str(e)
+        if "429" in msg or "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower():
+            return (
+                "Rate limit reached — free-tier quota exhausted for this minute or day. "
+                "Please wait a few minutes and try again, or check your usage at "
+                "https://aistudio.google.com"
+            )
+        if "503" in msg or "UNAVAILABLE" in msg or "high demand" in msg.lower():
+            return (
+                "The model is temporarily unavailable due to high demand. "
+                "Please try again in a few minutes."
+            )
+        if "500" in msg or "INTERNAL" in msg:
+            return "The model returned an internal server error. Please try again shortly."
+        clean = msg.split("\n")[0][:120]
+        return f"Model error: {clean}"
+
     def call_with_retry(
         self,
         fn: Callable,
@@ -427,7 +449,7 @@ class RateLimitHandler:
         logger.error(
             "RateLimitHandler [%s]: all %d retries exhausted.", self.model_name, self.max_retries
         )
-        raise last_exc
+        raise RuntimeError(self._user_friendly_error(last_exc)) from last_exc
 
     def _call_generic(self, fn: Callable, *args, **kwargs) -> Any:
         last_exc = None
@@ -450,7 +472,7 @@ class RateLimitHandler:
         logger.error(
             "RateLimitHandler [%s]: all %d retries exhausted.", self.model_name, self.max_retries
         )
-        raise last_exc
+        raise RuntimeError(self._user_friendly_error(last_exc)) from last_exc
 
     def status(self) -> dict:
         """Return current rate limit counters. Google only — returns empty dict for other providers."""

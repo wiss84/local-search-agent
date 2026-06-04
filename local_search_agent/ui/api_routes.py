@@ -59,13 +59,14 @@ logger = logging.getLogger(__name__)
 class _IngestProgress:
     workspace: str
     status: str = "idle"  # "running" | "done" | "error"
-    files_total: int = 0  # total source files discovered
-    files_processed: int = 0  # source files processed so far
-    files_skipped: int = 0  # source files skipped (unchanged)
-    files_failed: int = 0  # source files that errored
-    chunks_indexed: int = 0  # total chunks written to Meilisearch
+    files_total: int = 0
+    files_processed: int = 0
+    files_skipped: int = 0
+    files_failed: int = 0
+    chunks_indexed: int = 0
     current_file: str = ""
     error: str = ""
+    failed_files: list = field(default_factory=list)
     started_at: float = field(default_factory=time.monotonic)
     finished_at: float = 0.0
 
@@ -73,6 +74,25 @@ class _IngestProgress:
     def elapsed_s(self) -> float:
         end = self.finished_at or time.monotonic()
         return round(end - self.started_at, 1)
+
+    @staticmethod
+    def _fmt_elapsed(seconds: float) -> str:
+        """Format elapsed seconds as human-readable string."""
+        s = int(seconds)
+        if s < 60:
+            return f"{s}s"
+        elif s < 3600:
+            m, sec = divmod(s, 60)
+            return f"{m}m {sec}s"
+        elif s < 86400:
+            h, rem = divmod(s, 3600)
+            m, sec = divmod(rem, 60)
+            return f"{h}h {m}m {sec}s"
+        else:
+            d, rem = divmod(s, 86400)
+            h, rem2 = divmod(rem, 3600)
+            m, sec = divmod(rem2, 60)
+            return f"{d}d {h}h {m}m {sec}s"
 
     def to_dict(self) -> dict:
         return {
@@ -86,6 +106,8 @@ class _IngestProgress:
             "current_file": self.current_file,
             "error": self.error,
             "elapsed_s": self.elapsed_s,
+            "elapsed_fmt": self._fmt_elapsed(self.elapsed_s),
+            "failed_files": self.failed_files,
             "doc_count": self.chunks_indexed,
         }
 
@@ -1003,6 +1025,7 @@ def _run_ingest(app_state, workspace: str, force: bool = False, wipe: bool = Fal
         stats = pipeline.run(force=force, progress_callback=_callback)
         with _ingest_lock:
             progress.chunks_indexed = stats.indexed
+            progress.failed_files = [os.path.basename(f) for f in stats.errors if f]
         logger.info("Manual ingest complete for %r: %s", workspace, stats)
 
     except Exception as e:

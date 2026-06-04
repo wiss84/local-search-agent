@@ -68,15 +68,16 @@ class SemanticEnricher:
         compiler = self._get_concept_compiler()
         if compiler is not None:
             meta = compiler.compile(node)
-            # Merge: combine AI concepts with entities into node.concepts
-            # Combine AI synonyms into node.synonyms
             node.concepts = list(dict.fromkeys(node.concepts + meta.concepts + meta.entities))
             node.synonyms = list(dict.fromkeys(node.synonyms + meta.synonyms))
+            if meta.summary:
+                node.summary = meta.summary
             logger.debug(
-                "ConceptCompiler enriched %r: %d concepts, %d synonyms",
+                "ConceptCompiler enriched %r: %d concepts, %d synonyms, summary=%s",
                 node.title,
                 len(node.concepts),
                 len(node.synonyms),
+                bool(node.summary),
             )
 
         # Option B: Structural Parser

@@ -94,6 +94,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Cache HuggingFace model weights (docling)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-docling-models-${{ hashFiles('pyproject.toml') }}
+          restore-keys: hf-docling-models-
       - name: Upgrade build tools
         run: python -m pip install --upgrade pip setuptools wheel
       - name: Install package with dev dependencies

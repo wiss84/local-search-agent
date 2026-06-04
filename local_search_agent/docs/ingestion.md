@@ -19,10 +19,20 @@ Chunker (sliding window with overlap)
      ↓
 Semantic Enrichment (optional, Experimental)
      ↓
-Meilisearch batch indexing
+Meilisearch indexing (immediate, per file)
      ↓
 WorkspaceManager registration (SQLite)
 ```
+
+## Per-File Flush & Resume
+
+Each file is flushed to Meilisearch and registered in SQLite **immediately after it finishes parsing** — not after all files are done. This means:
+
+- If the process is killed or crashes mid-ingestion, all completed files are already safe in Meilisearch
+- On restart, `document_needs_reindex()` checks modification time against the SQLite registry and skips already-indexed files
+- Only the file that was actively being processed at the moment of the crash needs to be reprocessed
+
+This makes ingestion resilient on large corpora where a single problematic file could otherwise cause hours of work to be lost.
 
 ## Delta Ingestion
 
@@ -67,6 +77,86 @@ framework.wipe_and_reingest()
 | `.eml` | EMLParser | Email headers + body |
 
 Files with unsupported extensions are silently skipped.
+
+---
+
+## PDF OCR Strategy
+
+PDF ingestion uses a tiered OCR strategy designed to be as fast as possible while remaining accurate. Each batch of pages (15 pages at a time for large PDFs) goes through the following steps in order:
+
+### Step 1 — Native text extraction (instant)
+
+PyMuPDF attempts to extract the embedded text layer directly from the PDF. This is instant — no OCR, no ML models involved. If the batch has sufficient extractable text (more than `TESSERACT_FALLBACK_MIN_CHARS` characters), the pipeline runs Docling with OCR disabled for layout and Markdown conversion only, then moves to the next batch.
+
+This path handles all digitally-created PDFs (research papers, reports, exported documents) at full speed.
+
+### Step 2 — Tesseract OCR (fast, optional)
+
+If native text extraction returns empty or near-empty text, the batch is identified as scanned or image-based. If Tesseract is installed and on PATH, it is used as the OCR engine (~1 second per page on CPU). Tesseract is detected automatically on all platforms via `shutil.which("tesseract")` — no configuration needed.
+
+If Tesseract returns sufficient text, the pipeline moves to the next batch.
+
+**Tesseract is optional.** If it is not installed, this step is skipped silently and the pipeline falls back to Step 3.
+
+### Step 3 — RapidOCR + ONNXRuntime (last resort)
+
+If Tesseract is unavailable or also returned empty text, RapidOCR with the ONNXRuntime backend is used. This is slower than Tesseract (minutes per page for heavily scanned documents) but more accurate on complex layouts, low-quality scans, and non-Latin scripts.
+
+### Summary
+
+| Scenario | Engine used | Speed |
+|----------|-------------|-------|
+| Digital PDF with text layer | Native (PyMuPDF, no OCR) | Instant |
+| Scanned PDF, Tesseract installed | Tesseract CLI | ~1 sec/page |
+| Scanned PDF, Tesseract not installed | RapidOCR + ONNXRuntime | Slow |
+| RapidOCR also fails | Empty text, file still indexed | — |
+
+### Installing Tesseract (optional but recommended)
+
+Tesseract dramatically speeds up ingestion of scanned PDFs. Without it, a 100-page scanned document can take 30–120 minutes; with it, the same document typically finishes in under 2 minutes.
+
+**Windows**
+
+Download the installer from https://github.com/UB-Mannheim/tesseract/wiki
+During installation, make sure to check **“Add Tesseract to the system PATH”**.
+
+**Linux**
+```bash
+# Ubuntu / Debian
+sudo apt install tesseract-ocr
+
+# Fedora / RHEL
+sudo dnf install tesseract
+
+# Arch
+sudo pacman -S tesseract
+```
+
+**macOS**
+```bash
+brew install tesseract
+```
+
+After installation, restart the application. The pipeline will detect Tesseract automatically and log:
+```
+Tesseract detected at: /usr/bin/tesseract
+```
+
+If Tesseract is not found, the pipeline logs:
+```
+Tesseract not found on PATH — scanned PDFs will use RapidOCR (slower).
+```
+and continues without it.
+
+### Large PDF batching
+
+PDFs with more than `PDF_SPLIT_THRESHOLD` pages (default: 15) are split into batches of `PDF_PAGES_PER_BATCH` pages (default: 15) before being passed to the OCR pipeline. Each batch is processed independently as a temporary file, which:
+
+- Caps peak memory usage regardless of total page count
+- Allows per-batch OCR engine selection (a mixed PDF can use native extraction for digital pages and Tesseract for scanned pages within the same file)
+- Prevents a single bad page from aborting the entire document
+
+Batch results are concatenated into a single Markdown document before chunking.
 
 ---
 
@@ -197,11 +287,15 @@ The delta check uses the file's `modified_at` timestamp from the filesystem. If 
 
 **PDF pages are garbled or missing**
 
-Docling handles most PDF layouts well, but heavily image-based or scanned PDFs may produce poor results. Check that the PDF is searchable (text-layer present). Scanned PDFs without OCR will produce empty or near-empty text.
+Docling handles most PDF layouts well. For scanned PDFs, the pipeline automatically falls back to Tesseract (if installed) or RapidOCR. If results are poor, check whether the PDF is a scanned image-only document — install Tesseract for significantly better results on these files (see [PDF OCR Strategy](#pdf-ocr-strategy) above).
+
+**Scanned PDF ingestion is very slow**
+
+Without Tesseract, scanned PDFs fall back to RapidOCR which can take minutes per page on CPU. Install Tesseract to reduce this to ~1 second per page. See [Installing Tesseract](#installing-tesseract-optional-but-recommended) above.
 
 **Large files take a long time**
 
-Normal. Docling performs layout analysis which is CPU-intensive. The pipeline processes files sequentially. For large initial loads, consider running ingestion overnight.
+Normal for scanned PDFs. Docling performs layout analysis which is CPU-intensive. For digitally-created PDFs (with a text layer), ingestion is much faster since OCR is skipped entirely. Consider running large initial ingestion jobs overnight.
 
 **Memory errors on large Excel files**
 

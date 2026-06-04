@@ -134,6 +134,7 @@ class TestSerialisation:
             "indexed_at",
             "concepts",
             "synonyms",
+            "summary",
         }
         assert expected_keys == set(d.keys())
 

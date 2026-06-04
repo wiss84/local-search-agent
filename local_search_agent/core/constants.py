@@ -25,6 +25,7 @@ FIELD_WORKSPACE = "workspace"
 FIELD_SOURCE_PATH = "source_path"
 FIELD_CONCEPTS = "concepts"
 FIELD_SYNONYMS = "synonyms"
+FIELD_SUMMARY = "summary"
 
 # Meilisearch searchable attributes (order = relevance weight)
 SEARCHABLE_ATTRIBUTES = [
@@ -32,6 +33,7 @@ SEARCHABLE_ATTRIBUTES = [
     FIELD_TEXT,
     FIELD_CONCEPTS,
     FIELD_SYNONYMS,
+    FIELD_SUMMARY,
 ]
 
 # Meilisearch filterable attributes
@@ -54,7 +56,7 @@ DEFAULT_MAX_RETRIES = 5
 # so that the LLM can call tools several times per iteration before the hard
 # LangGraph-level ceiling is hit.
 LANGGRAPH_RECURSION_LIMIT = 200
-DEFAULT_TOP_K = 5
+DEFAULT_TOP_K = 8
 
 # Supported file types for ingestion
 SUPPORTED_EXTENSIONS = {
@@ -110,6 +112,12 @@ TABLE_LINE_RATIO = 0.5
 # ---------------------------------------------------------------------------
 # Large-file ingestion protection
 # ---------------------------------------------------------------------------
+
+# Minimum character count for a PDF batch OCR result to be considered non-empty.
+# If RapidOCR returns fewer characters than this for a batch, it is treated as
+# a failed/scanned page and the Tesseract fallback is triggered (if available).
+# ~10 chars = a few words; well below any real content but above pure whitespace.
+TESSERACT_FALLBACK_MIN_CHARS = 10
 
 # Pages-per-batch for PDFs that are split before passing to docling.
 # PDF_PAGES_PER_BATCH = 15 means extract_ocr+markdown for each batch

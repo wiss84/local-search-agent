@@ -60,18 +60,27 @@
   <span id="ingest-toast-msg">Ingesting…</span>
 </div>
 
-<!-- Settings Modal -->
+<!-- ═══════════════════════════════════════════
+     UNIFIED SETTINGS MODAL  (4 tabs)
+     1. API Keys
+     2. Semantic Search
+     3. Model Manager
+     4. Advanced
+     ═══════════════════════════════════════════ -->
 <div class="modal-overlay hidden" id="modal-settings">
   <div class="modal modal-scrollable">
-    <div class="modal-title">Set API Keys</div>
+    <div class="modal-title">Settings</div>
 
     <!-- Tab bar -->
     <div class="settings-tabs">
       <button class="settings-tab active" data-tab="keys">API Keys</button>
+      <button class="settings-tab" data-tab="semantic">Semantic Search</button>
+      <button class="settings-tab" data-tab="models">Model Manager</button>
+      <button class="settings-tab" data-tab="advanced">Advanced</button>
       <button class="settings-tab" data-tab="about">About</button>
     </div>
 
-    <!-- API Keys tab -->
+    <!-- ── Tab 1: API Keys ── -->
     <div class="settings-pane" id="settings-pane-keys">
       <p class="settings-hint">Keys are stored locally on your machine, outside the project folder. They are never uploaded anywhere.</p>
 
@@ -158,31 +167,8 @@
       </div>
     </div>
 
-    <!-- About tab -->
-    <div class="settings-pane hidden" id="settings-pane-about">
-      <div class="about-row"><span class="about-label">Version</span><span id="about-version">0.1.0</span></div>
-      <div class="about-row"><span class="about-label">GitHub</span><a href="https://github.com/wiss84/local-search-agent" target="_blank">wiss84/local-search-agent</a></div>
-    </div>
-
-    <div class="modal-actions modal-footer">
-      <button class="modal-btn ghost" id="btn-settings-close">Close</button>
-    </div>
-  </div>
-</div>
-
-<!-- Config Settings Modal -->
-<div class="modal-overlay hidden" id="modal-config">
-  <div class="modal modal-scrollable">
-    <div class="modal-title">Config Settings</div>
-
-    <!-- Tab bar -->
-    <div class="settings-tabs">
-      <button class="settings-tab active" data-tab="semantic">Semantic Search</button>
-      <button class="settings-tab" data-tab="models">Model Manager</button>
-    </div>
-
-    <!-- Semantic tab -->
-    <div class="settings-pane" id="settings-pane-semantic">
+    <!-- ── Tab 2: Semantic Search ── -->
+    <div class="settings-pane hidden" id="settings-pane-semantic">
       <p class="settings-hint">Semantic features add AI-powered metadata at ingest time. Disabled by default.</p>
 
       <div class="toggle-row">
@@ -229,7 +215,7 @@
       <span class="key-status" id="semantic-status"></span>
     </div>
 
-    <!-- Model Manager tab -->
+    <!-- ── Tab 3: Model Manager ── -->
     <div class="settings-pane hidden" id="settings-pane-models">
       <p class="settings-hint">Add model names per provider. They will appear in the Model dropdown in the sidebar.</p>
 
@@ -252,8 +238,102 @@
       <div id="model-list-container"></div>
     </div>
 
+    <!-- ── Tab 4: Advanced ── -->
+    <div class="settings-pane hidden" id="settings-pane-advanced">
+      <p class="settings-hint">Override ingestion and search constants. Leave blank to use the compiled-in defaults. Changes take effect on the next ingest run.</p>
+
+      <!-- Chunking -->
+      <div class="adv-section-label">Chunking</div>
+      <div class="adv-grid">
+        <div class="adv-field">
+          <label class="adv-label">Min chars before chunking <span class="adv-default" id="adv-default-CHUNK_MIN_CHARS"></span></label>
+          <input type="number" class="adv-input" id="adv-CHUNK_MIN_CHARS" min="0" placeholder="default" />
+        </div>
+        <div class="adv-field">
+          <label class="adv-label">Target chars per chunk <span class="adv-default" id="adv-default-CHUNK_TARGET_CHARS"></span></label>
+          <input type="number" class="adv-input" id="adv-CHUNK_TARGET_CHARS" min="100" placeholder="default" />
+        </div>
+        <div class="adv-field">
+          <label class="adv-label">Max chars per chunk <span class="adv-default" id="adv-default-CHUNK_MAX_CHARS"></span></label>
+          <input type="number" class="adv-input" id="adv-CHUNK_MAX_CHARS" min="100" placeholder="default" />
+        </div>
+        <div class="adv-field">
+          <label class="adv-label">Overlap chars between chunks <span class="adv-default" id="adv-default-CHUNK_OVERLAP_CHARS"></span></label>
+          <input type="number" class="adv-input" id="adv-CHUNK_OVERLAP_CHARS" min="0" placeholder="default" />
+        </div>
+      </div>
+
+      <!-- Table chunking -->
+      <div class="adv-section-label">Table / CSV Chunking</div>
+      <div class="adv-grid">
+        <div class="adv-field">
+          <label class="adv-label">Rows per chunk <span class="adv-default" id="adv-default-TABLE_ROWS_PER_CHUNK"></span></label>
+          <input type="number" class="adv-input" id="adv-TABLE_ROWS_PER_CHUNK" min="1" placeholder="default" />
+        </div>
+      </div>
+
+      <!-- PDF / DOCX batching -->
+      <div class="adv-section-label">PDF / DOCX Batching</div>
+      <div class="adv-grid">
+        <div class="adv-field">
+          <label class="adv-label">PDF pages per batch <span class="adv-default" id="adv-default-PDF_PAGES_PER_BATCH"></span></label>
+          <input type="number" class="adv-input" id="adv-PDF_PAGES_PER_BATCH" min="1" placeholder="default" />
+        </div>
+        <div class="adv-field">
+          <label class="adv-label">PDF split threshold (pages) <span class="adv-default" id="adv-default-PDF_SPLIT_THRESHOLD"></span></label>
+          <input type="number" class="adv-input" id="adv-PDF_SPLIT_THRESHOLD" min="1" placeholder="default" />
+        </div>
+        <div class="adv-field">
+          <label class="adv-label">PDF fallback pages per batch <span class="adv-default" id="adv-default-PDF_FALLBACK_PAGES_PER_BATCH"></span></label>
+          <input type="number" class="adv-input" id="adv-PDF_FALLBACK_PAGES_PER_BATCH" min="1" placeholder="default" />
+        </div>
+        <div class="adv-field">
+          <label class="adv-label">DOCX char split threshold <span class="adv-default" id="adv-default-DOCX_CHAR_SPLIT_THRESHOLD"></span></label>
+          <input type="number" class="adv-input" id="adv-DOCX_CHAR_SPLIT_THRESHOLD" min="100" placeholder="default" />
+        </div>
+      </div>
+
+      <!-- OCR -->
+      <div class="adv-section-label">OCR</div>
+      <div class="adv-grid">
+        <div class="adv-field">
+          <label class="adv-label">Tesseract fallback min chars <span class="adv-default" id="adv-default-TESSERACT_FALLBACK_MIN_CHARS"></span></label>
+          <input type="number" class="adv-input" id="adv-TESSERACT_FALLBACK_MIN_CHARS" min="0" placeholder="default" />
+        </div>
+      </div>
+
+      <!-- Agent / Search -->
+      <div class="adv-section-label">Agent &amp; Search</div>
+      <div class="adv-grid">
+        <div class="adv-field">
+          <label class="adv-label">Default top-k results <span class="adv-default" id="adv-default-DEFAULT_TOP_K"></span></label>
+          <input type="number" class="adv-input" id="adv-DEFAULT_TOP_K" min="1" placeholder="default" />
+        </div>
+        <div class="adv-field">
+          <label class="adv-label">Max agent iterations <span class="adv-default" id="adv-default-DEFAULT_MAX_ITERATIONS"></span></label>
+          <input type="number" class="adv-input" id="adv-DEFAULT_MAX_ITERATIONS" min="1" placeholder="default" />
+        </div>
+        <div class="adv-field">
+          <label class="adv-label">Snippet context chars <span class="adv-default" id="adv-default-SNIPPET_CONTEXT_CHARS"></span></label>
+          <input type="number" class="adv-input" id="adv-SNIPPET_CONTEXT_CHARS" min="50" placeholder="default" />
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap">
+        <button class="key-btn-save" id="btn-advanced-save">Save</button>
+        <button class="modal-btn ghost" id="btn-advanced-reset" style="font-size:12px">Reset to Defaults</button>
+        <span class="key-status" id="advanced-status"></span>
+      </div>
+    </div>
+
+    <!-- ── Tab 5: About ── -->
+    <div class="settings-pane hidden" id="settings-pane-about">
+      <div class="about-row"><span class="about-label">Version</span><span id="about-version">{{ version }}</span></div>
+      <div class="about-row"><span class="about-label">GitHub</span><a href="https://github.com/wiss84/local-search-agent" target="_blank">wiss84/local-search-agent</a></div>
+    </div>
+
     <div class="modal-actions modal-footer">
-      <button class="modal-btn ghost" id="btn-config-close">Close</button>
+      <button class="modal-btn ghost" id="btn-settings-close">Close</button>
     </div>
   </div>
 </div>

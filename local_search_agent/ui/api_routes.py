@@ -200,6 +200,10 @@ class IngestRequest(BaseModel):
     force: bool = False
 
 
+class AdvancedSettingsRequest(BaseModel):
+    overrides: dict  # keys from _ADVANCED_SETTING_KEYS, values are ints/floats or None
+
+
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
@@ -464,6 +468,47 @@ def build_ui_router(app_state) -> APIRouter:
         )
 
     # ----------------------------------------------------------------
+    # Advanced (ingestion tuning) settings
+    # ----------------------------------------------------------------
+
+    @router.get("/settings/advanced")
+    async def get_advanced_settings() -> JSONResponse:
+        """Return user-overridden advanced settings plus effective defaults."""
+        from local_search_agent.core.key_manager import (
+            get_advanced_settings,
+            get_effective_constants,
+        )
+
+        return JSONResponse(
+            {
+                "overrides": get_advanced_settings(),
+                "effective": get_effective_constants(),
+            }
+        )
+
+    @router.post("/settings/advanced")
+    async def set_advanced_settings(body: AdvancedSettingsRequest) -> JSONResponse:
+        """Persist advanced setting overrides. Pass an empty dict to reset all to defaults."""
+        from local_search_agent.core.key_manager import (
+            get_effective_constants,
+            set_advanced_settings,
+        )
+
+        set_advanced_settings(body.overrides)
+        return JSONResponse({"ok": True, "effective": get_effective_constants()})
+
+    @router.delete("/settings/advanced")
+    async def reset_advanced_settings() -> JSONResponse:
+        """Reset all advanced settings to compiled-in defaults."""
+        from local_search_agent.core.key_manager import (
+            get_effective_constants,
+            set_advanced_settings,
+        )
+
+        set_advanced_settings({})
+        return JSONResponse({"ok": True, "effective": get_effective_constants()})
+
+    # ----------------------------------------------------------------
     # Ingestion
     # ----------------------------------------------------------------
 
@@ -649,6 +694,21 @@ def build_ui_router(app_state) -> APIRouter:
         for ws in workspaces:
             ws["document_dirs"] = _normalise_dirs(ws)
         return JSONResponse({"workspaces": workspaces})
+
+    @router.delete("/workspaces/{workspace_name}")
+    async def delete_workspace(workspace_name: str, wipe: bool = False) -> JSONResponse:
+        """
+        Delete a workspace registration from SQLite.
+        Pass ?wipe=true to also delete its Meilisearch index.
+        """
+        ws = app_state.workspace_manager.get_workspace(workspace_name)
+        if ws is None:
+            raise HTTPException(404, detail=f"Workspace {workspace_name!r} not found.")
+        try:
+            app_state.framework.delete_workspace(name=workspace_name, wipe_index=wipe)
+            return JSONResponse({"ok": True, "workspace": workspace_name, "index_wiped": wipe})
+        except Exception as e:
+            raise HTTPException(500, detail=str(e))
 
     @router.post("/workspaces")
     async def create_workspace(request: Request) -> JSONResponse:

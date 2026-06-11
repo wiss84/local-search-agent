@@ -124,13 +124,64 @@ local-search config show-semantic
 
 Shows the current state of all semantic settings including the model override.
 
+### config set-advanced
+
+Override a compiled-in ingestion or search constant. Overrides are stored in `advanced_settings.json` in your user config directory and take effect on the next ingest run. Constants not overridden continue to use their compiled-in defaults.
+
+```bash
+local-search config set-advanced --key <CONSTANT_NAME> --value <number>
+local-search config set-advanced --reset
+```
+
+| Option | Description |
+|--------|-------------|
+| `--key` | Name of the constant to override (see table below) |
+| `--value` | New numeric value |
+| `--reset` | Remove all overrides and revert to compiled-in defaults |
+
+**Valid keys:**
+
+| Key | Category | Description |
+|-----|----------|-------------|
+| `CHUNK_MIN_CHARS` | Chunking | Minimum chars before a document is chunked |
+| `CHUNK_TARGET_CHARS` | Chunking | Target chars per chunk |
+| `CHUNK_MAX_CHARS` | Chunking | Hard cap chars per chunk |
+| `CHUNK_OVERLAP_CHARS` | Chunking | Overlap between consecutive chunks |
+| `TABLE_ROWS_PER_CHUNK` | Table/CSV | Rows per chunk for tabular data |
+| `PDF_PAGES_PER_BATCH` | PDF/DOCX | Pages per processing batch |
+| `PDF_SPLIT_THRESHOLD` | PDF/DOCX | Page count above which a PDF is split into batches |
+| `PDF_FALLBACK_PAGES_PER_BATCH` | PDF/DOCX | Batch size used when the primary batch fails |
+| `DOCX_CHAR_SPLIT_THRESHOLD` | PDF/DOCX | DOCX char count above which section-splitting is used |
+| `TESSERACT_FALLBACK_MIN_CHARS` | OCR | Minimum chars from PyMuPDF before Tesseract is tried |
+| `DEFAULT_TOP_K` | Search | Default number of results returned per search call |
+| `DEFAULT_MAX_ITERATIONS` | Agent | Default max agent reasoning iterations |
+| `SNIPPET_CONTEXT_CHARS` | Search | Characters of context around a match in snippets |
+
+```bash
+# Use smaller PDF batches on a low-RAM machine
+local-search config set-advanced --key PDF_PAGES_PER_BATCH --value 10
+
+# Larger chunks for a corpus of long technical documents
+local-search config set-advanced --key CHUNK_TARGET_CHARS --value 16000
+
+# Return more search results per agent call
+local-search config set-advanced --key DEFAULT_TOP_K --value 10
+
+# Reset all overrides back to compiled-in defaults
+local-search config set-advanced --reset
+```
+
+See `config show` to verify the effective values and identify which are overridden.
+
+
+
 ### config show
 
 ```bash
 local-search config show
 ```
 
-Shows everything in one view: version, saved API keys (masked), models per provider, semantic settings, and LangSmith tracing status. Useful for debugging.
+Shows everything in one view: version, saved API keys (masked), models per provider, semantic settings, advanced settings (with `[OVERRIDE]` markers next to any user-set values), and LangSmith tracing status. Useful for debugging and verifying what values are actually in use.
 
 ---
 

@@ -231,10 +231,7 @@ config = SearchAgentConfig(
 ### Tune for low memory
 
 ```python
-# Also adjust in constants.py:
-# PDF_PAGES_PER_BATCH = 10
-# DOCX_CHAR_SPLIT_THRESHOLD = 3000
-
+# Set ingestion constants via the framework (persists to advanced_settings.json)
 config = SearchAgentConfig(
     document_dirs=["/data/docs"],
     workspace_name="lean",
@@ -244,7 +241,86 @@ config = SearchAgentConfig(
     max_iterations=15,
     enable_semantic=False,
 )
+
+framework = SearchAgentFramework(config)
+framework.set_advanced_settings({
+    "PDF_PAGES_PER_BATCH": 10,
+    "DOCX_CHAR_SPLIT_THRESHOLD": 30000,
+    "CHUNK_TARGET_CHARS": 8000,
+})
+framework.ingest_and_index()
 ```
+
+Or equivalently via the CLI:
+
+```bash
+local-search config set-advanced --key PDF_PAGES_PER_BATCH --value 10
+local-search config set-advanced --key DOCX_CHAR_SPLIT_THRESHOLD --value 30000
+local-search config set-advanced --key CHUNK_TARGET_CHARS --value 8000
+```
+
+Or via the UI: **Settings → Advanced** tab.
+
+---
+
+## Advanced Settings
+
+Ingestion and search constants can be overridden without touching source code. Overrides are stored in `advanced_settings.json` in your user config directory (same location as `keys.json` and `settings.json`), and take effect on the next ingest run. Constants not explicitly overridden continue to use their compiled-in defaults from `constants.py`.
+
+### Where to set them
+
+**UI** — **Settings → Advanced** tab. Each field shows the current default in grey. Modified fields are highlighted in amber. Click **Save** to persist; **Reset to Defaults** to clear all overrides.
+
+**CLI:**
+
+```bash
+# Override one constant
+local-search config set-advanced --key PDF_PAGES_PER_BATCH --value 10
+
+# Reset all overrides back to compiled-in defaults
+local-search config set-advanced --reset
+
+# Verify effective values (overrides show [OVERRIDE])
+local-search config show
+```
+
+**Python API:**
+
+```python
+# Read effective values
+print(framework.get_advanced_settings())
+
+# Write overrides
+framework.set_advanced_settings({
+    "PDF_PAGES_PER_BATCH": 10,
+    "CHUNK_TARGET_CHARS": 8000,
+})
+
+# Reset
+framework.set_advanced_settings({})
+```
+
+### Reference table
+
+| Key | Category | Default | Description |
+|-----|----------|---------|-------------|
+| `CHUNK_MIN_CHARS` | Chunking | see constants.py | Minimum chars before chunking is applied |
+| `CHUNK_TARGET_CHARS` | Chunking | — | Target chars per chunk |
+| `CHUNK_MAX_CHARS` | Chunking | — | Hard cap chars per chunk |
+| `CHUNK_OVERLAP_CHARS` | Chunking | — | Overlap between consecutive chunks |
+| `TABLE_ROWS_PER_CHUNK` | Table/CSV | — | Rows per chunk for tabular data |
+| `PDF_PAGES_PER_BATCH` | PDF/DOCX | — | Pages per processing batch |
+| `PDF_SPLIT_THRESHOLD` | PDF/DOCX | — | Page count above which a PDF is split into batches |
+| `PDF_FALLBACK_PAGES_PER_BATCH` | PDF/DOCX | — | Batch size used when the primary batch fails |
+| `DOCX_CHAR_SPLIT_THRESHOLD` | PDF/DOCX | — | DOCX char count above which section-splitting is used |
+| `TESSERACT_FALLBACK_MIN_CHARS` | OCR | — | Min chars from PyMuPDF before Tesseract is tried |
+| `DEFAULT_TOP_K` | Search | — | Default results returned per search call |
+| `DEFAULT_MAX_ITERATIONS` | Agent | — | Default max agent reasoning iterations |
+| `SNIPPET_CONTEXT_CHARS` | Search | — | Chars of context around a match in result snippets |
+
+Run `local-search config show` to see the live default values for your installed version.
+
+> **Note:** Advanced settings affect ingestion behaviour. After changing chunking or batching constants, run `local-search ingest --force` (or use **Force Re-ingest** in the UI) to reprocess your documents with the new settings.
 
 ---
 

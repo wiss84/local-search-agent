@@ -875,6 +875,26 @@ $('btn-new-workspace').addEventListener('click', async () => {
 });
 $('btn-ws-cancel').addEventListener('click', () => $('modal-workspace').classList.add('hidden'));
 
+$('btn-delete-workspace').addEventListener('click', async (e) => {
+  if (!state.workspace) return;
+  const wipeIndex = e.shiftKey;
+  const msg = wipeIndex
+    ? `Delete workspace "${state.workspace}" AND wipe its Meilisearch index?\n\nThis removes all indexed documents and cannot be undone.`
+    : `Delete workspace "${state.workspace}"?\n\nThe Meilisearch index will be kept (hold Shift while clicking to also wipe the index).`;
+  if (!confirm(msg)) return;
+  try {
+    await api(`/workspaces/${encodeURIComponent(state.workspace)}?wipe=${wipeIndex}`, { method: 'DELETE' });
+    state.workspace = null;
+    state.sessionId = null;
+    state.sessionTokens = { query: 0, reply: 0 };
+    dom.messages.innerHTML = '';
+    clearDrawer();
+    updateTokenDisplay();
+    await loadWorkspaces();
+    await loadSessions();
+  } catch (e) { alert('Delete failed: ' + e.message); }
+});
+
 $('btn-set-db').addEventListener('click', async () => {
   const newPath = $('ws-db-input').value.trim();
   if (!newPath) { alert('Please enter a database path first.'); return; }
@@ -977,10 +997,10 @@ document.addEventListener('keydown', e => {
 });
 
 /* =============================================================
-   SETTINGS MODAL
+   SETTINGS MODAL  —  unified 4-tab modal
    ============================================================= */
 
-// Tab switching — scoped to #modal-settings only
+// Tab switching (all tabs live in #modal-settings)
 document.querySelectorAll('#modal-settings .settings-tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('#modal-settings .settings-tab').forEach(t => t.classList.remove('active'));
@@ -990,14 +1010,22 @@ document.querySelectorAll('#modal-settings .settings-tab').forEach(tab => {
   });
 });
 
-async function openSettings() {
-  // Reset all status labels and inputs
+async function openSettings(tab) {
+  // Reset to first tab unless a specific one is requested
+  const targetTab = tab || 'keys';
+  document.querySelectorAll('#modal-settings .settings-tab').forEach(t => {
+    const isTarget = t.dataset.tab === targetTab;
+    t.classList.toggle('active', isTarget);
+  });
+  document.querySelectorAll('#modal-settings .settings-pane').forEach(p => p.classList.add('hidden'));
+  const targetPane = $('settings-pane-' + targetTab);
+  if (targetPane) targetPane.classList.remove('hidden');
+
+  // --- Tab 1: API Keys ---
   ['google', 'openai', 'anthropic'].forEach(p => {
     $('key-input-' + p).value = '';
     setKeyStatus(p, '');
   });
-
-  // Load existing keys (masked) to show which ones are saved
   try {
     const data = await api('/keys');
     const keys = data.keys || {};
@@ -1009,11 +1037,8 @@ async function openSettings() {
         $('key-btn-delete-' + provider).classList.add('hidden');
       }
     });
-  } catch (e) {
-    console.warn('Could not load keys:', e);
-  }
+  } catch (e) { console.warn('Could not load keys:', e); }
 
-  // Load LangSmith config
   try {
     const ls = await api('/langsmith');
     if (ls.configured) {
@@ -1023,9 +1048,24 @@ async function openSettings() {
     } else {
       $('btn-langsmith-delete').classList.add('hidden');
     }
-  } catch (e) {
-    console.warn('Could not load LangSmith config:', e);
-  }
+  } catch (e) { console.warn('Could not load LangSmith config:', e); }
+
+  // --- Tab 2: Semantic ---
+  try {
+    const s = await api('/settings/semantic');
+    $('toggle-enable-semantic').checked        = !!s.enable_semantic;
+    $('toggle-enable-query-expansion').checked = !!s.enable_query_expansion;
+    const semProvider = s.semantic_provider || '';
+    $('sem-provider-select').value = semProvider;
+    _populateSemModelDropdown(semProvider, s.semantic_model || '');
+  } catch (e) { console.warn('Could not load semantic settings:', e); }
+
+  // --- Tab 3: Models ---
+  await loadModels();
+  renderModelList(_allModels);
+
+  // --- Tab 4: Advanced ---
+  await loadAdvancedSettings();
 
   $('modal-settings').classList.remove('hidden');
 }
@@ -1080,7 +1120,7 @@ document.querySelectorAll('.key-btn-delete[data-provider]').forEach(btn => {
   });
 });
 
-$('btn-settings').addEventListener('click', openSettings);
+$('btn-settings').addEventListener('click', () => openSettings());
 $('btn-settings-close').addEventListener('click', () => $('modal-settings').classList.add('hidden'));
 
 // LangSmith save
@@ -1122,6 +1162,133 @@ $('modal-settings').addEventListener('click', e => {
   if (e.target === $('modal-settings')) $('modal-settings').classList.add('hidden');
 });
 
+/* Populate semantic model dropdown based on selected provider */
+function _populateSemModelDropdown(provider, currentModel) {
+  const sel = $('sem-model-select');
+  sel.innerHTML = '<option value="">Default</option>';
+  const models = provider ? (_allModels[provider] || []) : [];
+  models.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = m;
+    if (m === currentModel) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  if (!models.length && provider) {
+    const opt = document.createElement('option');
+    opt.disabled = true;
+    opt.textContent = 'No models \u2014 add via Model Manager';
+    sel.appendChild(opt);
+  }
+}
+
+$('sem-provider-select').addEventListener('change', () => {
+  _populateSemModelDropdown($('sem-provider-select').value, '');
+});
+
+/* Semantic save */
+$('btn-semantic-save').addEventListener('click', async () => {
+  const btn = $('btn-semantic-save');
+  btn.disabled = true; btn.textContent = 'Saving\u2026';
+  try {
+    await api('/settings/semantic', {
+      method: 'POST',
+      body: JSON.stringify({
+        enable_semantic:        $('toggle-enable-semantic').checked,
+        enable_query_expansion: $('toggle-enable-query-expansion').checked,
+        semantic_provider:      $('sem-provider-select').value,
+        semantic_model:         $('sem-model-select').value,
+      }),
+    });
+    $('semantic-status').textContent = '\u2713 Saved';
+    $('semantic-status').className = 'key-status ok';
+    setTimeout(() => { $('semantic-status').textContent = ''; $('semantic-status').className = 'key-status'; }, 2500);
+  } catch (e) {
+    $('semantic-status').textContent = '\u2717 ' + (e.message || 'Failed');
+    $('semantic-status').className = 'key-status err';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+});
+
+/* =============================================================
+   ADVANCED SETTINGS TAB
+   ============================================================= */
+const ADV_KEYS = [
+  'CHUNK_MIN_CHARS', 'CHUNK_TARGET_CHARS', 'CHUNK_MAX_CHARS', 'CHUNK_OVERLAP_CHARS',
+  'TABLE_ROWS_PER_CHUNK',
+  'PDF_PAGES_PER_BATCH', 'PDF_SPLIT_THRESHOLD', 'PDF_FALLBACK_PAGES_PER_BATCH',
+  'DOCX_CHAR_SPLIT_THRESHOLD', 'TESSERACT_FALLBACK_MIN_CHARS',
+  'DEFAULT_TOP_K', 'DEFAULT_MAX_ITERATIONS', 'SNIPPET_CONTEXT_CHARS',
+];
+
+async function loadAdvancedSettings() {
+  try {
+    const data = await api('/settings/advanced');
+    const effective = data.effective || {};
+    const overrides = data.overrides || {};
+    ADV_KEYS.forEach(key => {
+      const input = $('adv-' + key);
+      const defLabel = $('adv-default-' + key);
+      if (!input) return;
+      const defVal = effective[key] ?? '';
+      if (defLabel) defLabel.textContent = '(default: ' + defVal + ')';
+      // If overridden, fill the input and mark it; otherwise leave blank
+      if (key in overrides) {
+        input.value = overrides[key];
+        input.classList.add('overridden');
+      } else {
+        input.value = '';
+        input.classList.remove('overridden');
+      }
+    });
+  } catch (e) { console.warn('Could not load advanced settings:', e); }
+}
+
+// Mark field amber when user edits it
+ADV_KEYS.forEach(key => {
+  const input = $('adv-' + key);
+  if (input) input.addEventListener('input', () => {
+    input.classList.toggle('overridden', input.value !== '');
+  });
+});
+
+$('btn-advanced-save').addEventListener('click', async () => {
+  const btn = $('btn-advanced-save');
+  btn.disabled = true; btn.textContent = 'Saving\u2026';
+  const overrides = {};
+  ADV_KEYS.forEach(key => {
+    const input = $('adv-' + key);
+    if (input && input.value.trim() !== '') overrides[key] = input.value.trim();
+  });
+  try {
+    await api('/settings/advanced', { method: 'POST', body: JSON.stringify({ overrides }) });
+    $('advanced-status').textContent = '\u2713 Saved \u2014 takes effect on next ingest';
+    $('advanced-status').className = 'key-status ok';
+    setTimeout(() => { $('advanced-status').textContent = ''; $('advanced-status').className = 'key-status'; }, 3500);
+    await loadAdvancedSettings();
+  } catch (e) {
+    $('advanced-status').textContent = '\u2717 ' + (e.message || 'Failed');
+    $('advanced-status').className = 'key-status err';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+});
+
+$('btn-advanced-reset').addEventListener('click', async () => {
+  if (!confirm('Reset all Advanced settings to compiled-in defaults?')) return;
+  try {
+    await api('/settings/advanced', { method: 'DELETE' });
+    $('advanced-status').textContent = '\u2713 Reset to defaults';
+    $('advanced-status').className = 'key-status ok';
+    setTimeout(() => { $('advanced-status').textContent = ''; $('advanced-status').className = 'key-status'; }, 2500);
+    await loadAdvancedSettings();
+  } catch (e) {
+    $('advanced-status').textContent = '\u2717 ' + (e.message || 'Failed');
+    $('advanced-status').className = 'key-status err';
+  }
+});
+
 /* =============================================================
    DOCS BUTTON
    ============================================================= */
@@ -1153,10 +1320,8 @@ function repopulateModelDropdown(provider) {
     `<option value="${escHtml(m)}"${m === current ? ' selected' : ''}>${escHtml(m)}</option>`
   ).join('');
   if (models.length === 0) {
-    sel.innerHTML = '<option value="" disabled selected>No models \u2014 add via Config</option>';
+    sel.innerHTML = '<option value="" disabled selected>No models \u2014 add via Settings</option>';
   } else if (!models.includes(current)) {
-    // Current model doesn\'t exist for this provider — switch to first available
-    // and persist so the backend config stays in sync
     state.model = models[0];
     sel.value = models[0];
     api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.model', value: models[0] }) })
@@ -1164,106 +1329,17 @@ function repopulateModelDropdown(provider) {
   }
 }
 
-// Override the provider change handler to also repopulate models
 dom.providerSelect.addEventListener('change', async () => {
   state.provider = dom.providerSelect.value;
   repopulateModelDropdown(state.provider);
   await api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.provider', value: state.provider }) });
 });
 
-// Override model change to work with select
 dom.modelInput.addEventListener('change', async () => {
   state.model = dom.modelInput.value;
   if (state.model) {
     await api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.model', value: state.model }) });
     updateTokenDisplay();
-  }
-});
-
-/* =============================================================
-   CONFIG MODAL — tab switching
-   ============================================================= */
-document.querySelectorAll('#modal-config .settings-tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('#modal-config .settings-tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('#modal-config .settings-pane').forEach(p => p.classList.add('hidden'));
-    tab.classList.add('active');
-    $('settings-pane-' + tab.dataset.tab).classList.remove('hidden');
-  });
-});
-
-async function openConfig() {
-  // Load semantic settings
-  try {
-    const s = await api('/settings/semantic');
-    $('toggle-enable-semantic').checked        = !!s.enable_semantic;
-    $('toggle-enable-query-expansion').checked = !!s.enable_query_expansion;
-    // Populate semantic provider dropdown
-    const semProvider = s.semantic_provider || '';
-    $('sem-provider-select').value = semProvider;
-    // Populate semantic model dropdown for the saved provider
-    _populateSemModelDropdown(semProvider, s.semantic_model || '');
-  } catch (e) { console.warn('Could not load semantic settings:', e); }
-
-  // Load model list
-  await loadModels();
-  renderModelList(_allModels);
-
-  $('modal-config').classList.remove('hidden');
-}
-
-/* Populate semantic model dropdown based on selected provider */
-function _populateSemModelDropdown(provider, currentModel) {
-  const sel = $('sem-model-select');
-  sel.innerHTML = '<option value="">Default</option>';
-  const models = provider ? (_allModels[provider] || []) : [];
-  models.forEach(m => {
-    const opt = document.createElement('option');
-    opt.value = m;
-    opt.textContent = m;
-    if (m === currentModel) opt.selected = true;
-    sel.appendChild(opt);
-  });
-  if (!models.length && provider) {
-    const opt = document.createElement('option');
-    opt.disabled = true;
-    opt.textContent = 'No models — add via Model Manager';
-    sel.appendChild(opt);
-  }
-}
-
-$('sem-provider-select').addEventListener('change', () => {
-  _populateSemModelDropdown($('sem-provider-select').value, '');
-});
-
-$('btn-config').addEventListener('click', openConfig);
-$('btn-config-close').addEventListener('click', () => $('modal-config').classList.add('hidden'));
-$('modal-config').addEventListener('click', e => {
-  if (e.target === $('modal-config')) $('modal-config').classList.add('hidden');
-});
-
-/* Semantic save */
-$('btn-semantic-save').addEventListener('click', async () => {
-  const btn = $('btn-semantic-save');
-  btn.disabled = true; btn.textContent = 'Saving\u2026';
-  try {
-    await api('/settings/semantic', {
-      method: 'POST',
-      body: JSON.stringify({
-        enable_semantic:        $('toggle-enable-semantic').checked,
-        enable_query_expansion: $('toggle-enable-query-expansion').checked,
-        semantic_provider:      $('sem-provider-select').value,
-        semantic_model:         $('sem-model-select').value,
-      }),
-    });
-    $('semantic-status').textContent = '\u2713 Saved';
-    $('semantic-status').className = 'key-status ok';
-    setTimeout(() => { $('semantic-status').textContent = ''; $('semantic-status').className = 'key-status'; }, 2500);
-  } catch (e) {
-    $('semantic-status').textContent = '\u2717 ' + (e.message || 'Failed');
-    $('semantic-status').className = 'key-status err';
-  } finally {
-    btn.disabled = false; btn.textContent = 'Save';
   }
 });
 
@@ -1294,8 +1370,6 @@ function renderModelList(models) {
     }
     container.appendChild(group);
   });
-
-  // Wire remove buttons
   container.querySelectorAll('.model-item-delete').forEach(btn => {
     btn.addEventListener('click', async () => {
       const provider = btn.dataset.provider;
@@ -1342,31 +1416,26 @@ $('btn-model-add').addEventListener('click', async () => {
 /* =============================================================
    BOOT
    ============================================================= */
-// Force layout reflow on window resize (pywebview doesn't always
-// reflow 100vh correctly on Windows when the user resizes manually)
 window.addEventListener('resize', () => {
   const app = document.getElementById('app');
-  if (app) {
-    app.style.height = window.innerHeight + 'px';
-  }
+  if (app) app.style.height = window.innerHeight + 'px';
 });
-// Also set it once at startup for safety
 document.addEventListener('DOMContentLoaded', () => {
   const app = document.getElementById('app');
   if (app) app.style.height = window.innerHeight + 'px';
 });
 
 async function boot() {
-  console.log('🚀 Booting Local Search Agent UI...');
+  console.log('\ud83d\ude80 Booting Local Search Agent UI...');
   await loadConfig();
-  console.log('✓ Config loaded');
+  console.log('\u2713 Config loaded');
   await loadModels();
-  console.log('✓ Models loaded');
+  console.log('\u2713 Models loaded');
   dom.providerSelect.value = state.provider;
   await loadWorkspaces();
-  console.log('✓ Workspaces loaded:', state.workspaces.length, 'workspaces');
+  console.log('\u2713 Workspaces loaded:', state.workspaces.length, 'workspaces');
   if (state.workspace) {
-    console.log('📂 Active workspace:', state.workspace);
+    console.log('\ud83d\udcc2 Active workspace:', state.workspace);
     await loadSessions();
     if (state.sessions.length > 0) {
       await loadSession(state.sessions[0].session_id);
@@ -1374,13 +1443,13 @@ async function boot() {
       await newChat();
     }
   } else {
-    console.warn('⚠️  No workspace selected. Create one to start.');
+    console.warn('\u26a0\ufe0f  No workspace selected. Create one to start.');
   }
   updateTokenDisplay();
-  console.log('🔍 Starting health checks...');
+  console.log('\ud83d\udd0d Starting health checks...');
   pollHealth();
   setInterval(pollHealth, 15000);
-  console.log('✅ Boot complete');
+  console.log('\u2705 Boot complete');
 }
 
 boot().catch(e => console.error('Boot error:', e));

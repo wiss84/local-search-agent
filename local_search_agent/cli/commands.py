@@ -227,6 +227,9 @@ def cmd_config_show(args: argparse.Namespace) -> None:
     """Show all current config -- keys, models, semantic settings, LangSmith."""
     from local_search_agent.core.constants import __version__
     from local_search_agent.core.key_manager import (
+        advanced_settings_file_path,
+        get_advanced_settings,
+        get_effective_constants,
         get_langsmith,
         get_models,
         get_semantic_settings,
@@ -263,6 +266,16 @@ def cmd_config_show(args: argparse.Namespace) -> None:
         else:
             print(f"  {key:<28} {val or '(default)'}")
 
+    # Advanced settings
+    print(f"\nAdvanced Settings  ({advanced_settings_file_path()}):")
+    overrides = get_advanced_settings()
+    effective = get_effective_constants()
+    if not overrides:
+        print("  (all defaults)")
+    for key, eff_val in effective.items():
+        override_marker = " [OVERRIDE]" if key in overrides else ""
+        print(f"  {key:<35} {eff_val}{override_marker}")
+
     # LangSmith
     print("\nLangSmith Tracing:")
     ls = get_langsmith()
@@ -272,9 +285,32 @@ def cmd_config_show(args: argparse.Namespace) -> None:
         print("  Not configured")
 
 
-# ---------------------------------------------------------------------------
-# setup
-# ---------------------------------------------------------------------------
+def cmd_config_set_advanced(args: argparse.Namespace) -> None:
+    """Set one advanced setting override, or reset all to defaults."""
+    from local_search_agent.core.key_manager import (
+        advanced_settings_file_path,
+        get_advanced_settings,
+        get_effective_constants,
+        set_advanced_settings,
+    )
+
+    if args.reset:
+        set_advanced_settings({})
+        print("\u2713 All advanced settings reset to compiled-in defaults.")
+        print(f"  File: {advanced_settings_file_path()}")
+        return
+
+    if args.key is None or args.value is None:
+        print("Provide --key and --value, or --reset.")
+        print("  Example: local-search config set-advanced --key PDF_PAGES_PER_BATCH --value 10")
+        return
+
+    current = get_advanced_settings()
+    current[args.key] = args.value
+    set_advanced_settings(current)
+    effective = get_effective_constants()
+    print(f"\u2713 {args.key} = {effective.get(args.key, args.value)}")
+    print(f"  Stored at: {advanced_settings_file_path()}")
 
 
 def cmd_setup(args: argparse.Namespace) -> None:
@@ -772,9 +808,37 @@ def build_parser() -> argparse.ArgumentParser:
     p_cfg_show_semantic.set_defaults(func=cmd_config_show_semantic)
 
     p_cfg_show = config_sub.add_parser(
-        "show", help="Show all current config (keys, models, semantic, LangSmith)."
+        "show", help="Show all current config (keys, models, semantic, advanced, LangSmith)."
     )
     p_cfg_show.set_defaults(func=cmd_config_show)
+
+    # set-advanced: override a single ingestion/search constant
+    p_cfg_adv = config_sub.add_parser(
+        "set-advanced",
+        help="Override an ingestion/search constant, or reset all to defaults.",
+        description=(
+            "Override compiled-in constants stored in advanced_settings.json.\n\n"
+            "Examples:\n"
+            "  local-search config set-advanced --key PDF_PAGES_PER_BATCH --value 10\n"
+            "  local-search config set-advanced --key CHUNK_TARGET_CHARS --value 12000\n"
+            "  local-search config set-advanced --reset  # back to all defaults\n\n"
+            "Valid keys:\n"
+            "  CHUNK_MIN_CHARS, CHUNK_TARGET_CHARS, CHUNK_MAX_CHARS, CHUNK_OVERLAP_CHARS,\n"
+            "  TABLE_ROWS_PER_CHUNK,\n"
+            "  PDF_PAGES_PER_BATCH, PDF_SPLIT_THRESHOLD, PDF_FALLBACK_PAGES_PER_BATCH,\n"
+            "  DOCX_CHAR_SPLIT_THRESHOLD, TESSERACT_FALLBACK_MIN_CHARS,\n"
+            "  DEFAULT_TOP_K, DEFAULT_MAX_ITERATIONS, SNIPPET_CONTEXT_CHARS"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_cfg_adv.add_argument(
+        "--key", default=None, metavar="CONSTANT_NAME", help="Name of the constant to override."
+    )
+    p_cfg_adv.add_argument("--value", default=None, metavar="VALUE", help="New value (number).")
+    p_cfg_adv.add_argument(
+        "--reset", action="store_true", help="Reset ALL advanced settings to compiled-in defaults."
+    )
+    p_cfg_adv.set_defaults(func=cmd_config_set_advanced)
 
     # -- setup ---------------------------------------------------------------
     p_setup = sub.add_parser(

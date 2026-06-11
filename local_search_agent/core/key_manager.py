@@ -423,3 +423,116 @@ def set_saved_db_path(path: Optional[str]) -> None:
     else:
         s.pop("db_path", None)
     _save_settings(s)
+
+
+# ---------------------------------------------------------------------------
+# Advanced / ingestion tuning settings — stored in advanced_settings.json
+# in the user config dir so they survive pip upgrades.
+# Each key corresponds to a constant in constants.py; unset keys fall back
+# to the hardcoded constant values at runtime.
+# ---------------------------------------------------------------------------
+
+# Keys and their Python types, mirroring constants.py
+_ADVANCED_SETTING_KEYS: dict[str, type] = {
+    # Chunking
+    "CHUNK_MIN_CHARS": int,
+    "CHUNK_TARGET_CHARS": int,
+    "CHUNK_MAX_CHARS": int,
+    "CHUNK_OVERLAP_CHARS": int,
+    # Table chunking
+    "TABLE_ROWS_PER_CHUNK": int,
+    # PDF / DOCX batching
+    "PDF_PAGES_PER_BATCH": int,
+    "PDF_SPLIT_THRESHOLD": int,
+    "PDF_FALLBACK_PAGES_PER_BATCH": int,
+    "DOCX_CHAR_SPLIT_THRESHOLD": int,
+    # OCR fallback
+    "TESSERACT_FALLBACK_MIN_CHARS": int,
+    # Agent
+    "DEFAULT_TOP_K": int,
+    "DEFAULT_MAX_ITERATIONS": int,
+    # Search
+    "SNIPPET_CONTEXT_CHARS": int,
+}
+
+
+def _advanced_path() -> Path:
+    config_dir = Path(user_config_dir(_APP_NAME))
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir / "advanced_settings.json"
+
+
+def _load_advanced() -> dict:
+    path = _advanced_path()
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_advanced(data: dict) -> None:
+    path = _advanced_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def get_advanced_settings() -> dict:
+    """
+    Return all user-overridden advanced settings.
+    Only keys that have been explicitly set are returned; callers should
+    fall back to constants.py for any missing key.
+    """
+    return dict(_load_advanced())
+
+
+def set_advanced_settings(overrides: dict) -> None:
+    """
+    Persist a full set of advanced setting overrides.
+    Pass an empty dict to reset everything to defaults.
+    Values are coerced to their expected types; unknown keys are ignored.
+    """
+    cleaned: dict = {}
+    for key, expected_type in _ADVANCED_SETTING_KEYS.items():
+        if key in overrides and overrides[key] is not None and str(overrides[key]).strip() != "":
+            try:
+                cleaned[key] = expected_type(overrides[key])
+            except (ValueError, TypeError):
+                pass  # silently skip bad values
+    _save_advanced(cleaned)
+
+
+def advanced_settings_file_path() -> str:
+    """Return the path to the advanced_settings.json file (for display)."""
+    return str(_advanced_path())
+
+
+def get_effective_constants() -> dict:
+    """
+    Return the effective value of every advanced setting, merging user
+    overrides on top of the compiled-in constants from constants.py.
+    This is the single source of truth that ingestion and search code
+    should read from when they want to respect user overrides.
+    """
+    from local_search_agent.core import constants as _C
+
+    defaults = {
+        "CHUNK_MIN_CHARS": _C.CHUNK_MIN_CHARS,
+        "CHUNK_TARGET_CHARS": _C.CHUNK_TARGET_CHARS,
+        "CHUNK_MAX_CHARS": _C.CHUNK_MAX_CHARS,
+        "CHUNK_OVERLAP_CHARS": _C.CHUNK_OVERLAP_CHARS,
+        "TABLE_ROWS_PER_CHUNK": _C.TABLE_ROWS_PER_CHUNK,
+        "PDF_PAGES_PER_BATCH": _C.PDF_PAGES_PER_BATCH,
+        "PDF_SPLIT_THRESHOLD": _C.PDF_SPLIT_THRESHOLD,
+        "PDF_FALLBACK_PAGES_PER_BATCH": _C.PDF_FALLBACK_PAGES_PER_BATCH,
+        "DOCX_CHAR_SPLIT_THRESHOLD": _C.DOCX_CHAR_SPLIT_THRESHOLD,
+        "TESSERACT_FALLBACK_MIN_CHARS": _C.TESSERACT_FALLBACK_MIN_CHARS,
+        "DEFAULT_TOP_K": _C.DEFAULT_TOP_K,
+        "DEFAULT_MAX_ITERATIONS": _C.DEFAULT_MAX_ITERATIONS,
+        "SNIPPET_CONTEXT_CHARS": _C.SNIPPET_CONTEXT_CHARS,
+    }
+    overrides = _load_advanced()
+    defaults.update(overrides)
+    return defaults

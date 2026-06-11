@@ -234,6 +234,42 @@ status = framework.get_scheduler_status() -> dict
 ```
 Return scheduler state: `running`, `scheduled_jobs`, next run times.
 
+### Advanced Settings
+
+```python
+settings = framework.get_advanced_settings() -> dict
+```
+Return the effective value of every ingestion/search constant, merging any user overrides on top of the compiled-in defaults from `constants.py`. The returned dict always contains every key — overridden keys reflect the user-set value, unoverridden keys reflect the compiled-in default.
+
+```python
+effective = framework.set_advanced_settings(overrides: dict) -> dict
+```
+Persist ingestion/search constant overrides to `advanced_settings.json` in the user config directory. Overrides take effect on the **next** ingest run. Pass an empty dict `{}` to reset everything back to compiled-in defaults. Returns the effective constants after applying the overrides.
+
+Valid keys: `CHUNK_MIN_CHARS`, `CHUNK_TARGET_CHARS`, `CHUNK_MAX_CHARS`, `CHUNK_OVERLAP_CHARS`, `TABLE_ROWS_PER_CHUNK`, `PDF_PAGES_PER_BATCH`, `PDF_SPLIT_THRESHOLD`, `PDF_FALLBACK_PAGES_PER_BATCH`, `DOCX_CHAR_SPLIT_THRESHOLD`, `TESSERACT_FALLBACK_MIN_CHARS`, `DEFAULT_TOP_K`, `DEFAULT_MAX_ITERATIONS`, `SNIPPET_CONTEXT_CHARS`.
+
+Unknown keys and values that cannot be coerced to the expected numeric type are silently ignored.
+
+**Example:**
+
+```python
+# Inspect current effective values
+print(framework.get_advanced_settings())
+# {'CHUNK_TARGET_CHARS': 10000, 'PDF_PAGES_PER_BATCH': 20, ...}
+
+# Tune for a low-RAM machine
+framework.set_advanced_settings({
+    "PDF_PAGES_PER_BATCH": 10,
+    "CHUNK_TARGET_CHARS": 8000,
+})
+framework.ingest_and_index(force=True)
+
+# Reset all overrides back to compiled-in defaults
+framework.set_advanced_settings({})
+```
+
+Advanced settings are shared across the CLI (`local-search config set-advanced`), the UI **Settings → Advanced** tab, and the Python API. They persist across restarts and `pip install --upgrade`.
+
 ### Semantic Settings
 
 ```python

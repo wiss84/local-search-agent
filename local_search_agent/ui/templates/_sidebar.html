@@ -6,7 +6,12 @@
   <!-- ── Workspace ── -->
   <div class="lp-section">
     <div class="lp-label">Workspace</div>
-    <select id="workspace-select" class="lp-select"></select>
+    <div style="display:flex;gap:6px;align-items:center">
+      <select id="workspace-select" class="lp-select" style="flex:1;min-width:0"></select>
+      <button id="btn-delete-workspace" class="lp-btn-icon-danger" title="Delete workspace">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="2,4 14,4"/><path d="M5,4V2h6v2"/><path d="M3,4l1,10h8l1-10"/></svg>
+      </button>
+    </div>
     <button id="btn-new-workspace" class="lp-btn-ghost">+ New Workspace</button>
   </div>
 

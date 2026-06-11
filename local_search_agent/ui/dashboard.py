@@ -30,6 +30,8 @@ import threading
 import time
 from typing import Optional
 
+from local_search_agent.core.constants import __version__
+
 logger = logging.getLogger(__name__)
 
 
@@ -206,6 +208,7 @@ def build_dashboard_app(app_state: AppState):
         html = template.render(
             port=app_state.config.port,
             file_server_port=app_state.config.file_server_port,
+            version=__version__,
         )
         return HTMLResponse(content=html)
 

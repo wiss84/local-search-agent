@@ -105,10 +105,6 @@ CHUNK_OVERLAP_CHARS = 500
 # The header row is prepended to every chunk automatically.
 TABLE_ROWS_PER_CHUNK = 100
 
-# Minimum fraction of non-empty lines that must start with '|' for a document
-# to be classified as a table/CSV document and use row-based chunking.
-TABLE_LINE_RATIO = 0.5
-
 # ---------------------------------------------------------------------------
 # Large-file ingestion protection
 # ---------------------------------------------------------------------------

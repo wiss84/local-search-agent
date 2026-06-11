@@ -17,6 +17,7 @@ test_logs.md
 ruff_logs.md
 .coverage
 diagnose_linkgraph.py
+local_search_agent.db
 
 # Python
 __pycache__/

@@ -64,7 +64,7 @@ def build_search_tool(meili_client, config):
         Search the local document index for relevant documents.
 
         Use this tool first before answering any question.
-        Returns a list of matching documents with short snippets.
+        Returns a list of matching documents with short snippets and summaries.
         If a snippet looks relevant but incomplete, use fetch_local_url to read the full document.
 
         Args:

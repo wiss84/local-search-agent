@@ -13,29 +13,24 @@ Design goals
   follows any particular structure.
 - Provide overlap so that content near a chunk boundary is findable from
   either side.
+- Protect table integrity.  Tables in mixed-content documents must never be
+  split mid-row; only pure-table documents use row-based chunking.
 
 Chunking pipeline (applied in order)
 --------------------------------------
 1. Short document check
    If len(text) < CHUNK_MIN_CHARS → return as-is (single node).
 
-2. Table / CSV detection
-   If >TABLE_LINE_RATIO of non-empty lines start with '|' → row-based split
+2. Pure table / CSV detection
+   If >=95% of non-empty lines start with '|' → row-based split
    (TABLE_ROWS_PER_CHUNK rows per chunk, header prepended to every chunk).
    Table-mode does NOT use overlap since rows are structurally independent.
 
-3. Sliding-window accumulation (all other documents)
-   Collect natural break points in priority order:
-     a. Blank line immediately after a Markdown heading (## / ### / etc.)  [priority 4]
-     b. Double blank line  (strong paragraph boundary)                     [priority 3]
-     c. Single blank line  (weak paragraph boundary)                       [priority 2]
-     d. Sentence-ending punctuation ('. ' / '! ' / '? ')                  [priority 1]
-   Accumulate text until the chunk reaches CHUNK_TARGET_CHARS, then cut at
-   the next available break point.  If a block exceeds CHUNK_MAX_CHARS with
-   no break point, force-split there.
-   The last CHUNK_OVERLAP_CHARS characters of every chunk are prepended to
-   the next chunk so that content near boundaries stays findable from both
-   sides.
+3. Mixed content (all other documents)
+   Split the text into semantic blocks at double-newline boundaries, then
+   accumulate blocks into chunks respecting CHUNK_TARGET_CHARS / CHUNK_MAX_CHARS.
+   Table blocks (>=90% pipe lines) are never split; prose blocks use a
+   sliding-window with overlap.
 
 All constants live in core.constants — adjust them there.
 """
@@ -52,7 +47,6 @@ from local_search_agent.core.constants import (
     CHUNK_MIN_CHARS,
     CHUNK_OVERLAP_CHARS,
     CHUNK_TARGET_CHARS,
-    TABLE_LINE_RATIO,
     TABLE_ROWS_PER_CHUNK,
 )
 from local_search_agent.core.document_node import DocumentNode
@@ -70,6 +64,14 @@ _BP_HEADING = 4
 _BP_DOUBLE_NL = 3
 _BP_SINGLE_NL = 2
 _BP_SENTENCE = 1
+
+# Fraction of non-empty lines that must start with '|' for a document
+# to be classified as a *pure* table (row-based chunking).
+_PURE_TABLE_THRESHOLD = 0.95
+
+# Fraction of non-empty lines in a block that must start with '|' for
+# that block to be treated as a table block in mixed-content chunking.
+_BLOCK_TABLE_THRESHOLD = 0.90
 
 
 # ---------------------------------------------------------------------------
@@ -118,14 +120,14 @@ def chunk_document(node: DocumentNode) -> list[DocumentNode]:
 
     for attempt in range(max_attempts):
         try:
-            if _is_table_document(text):
+            if _detect_document_type(text) == "table":
                 if attempt == 0:
-                    logger.debug("Using table chunking for %r", node.title)
+                    logger.debug("Using pure-table (row-based) chunking for %r", node.title)
                 raw_chunks = _chunk_table(text)
             else:
                 if attempt == 0:
-                    logger.debug("Using sliding-window chunking for %r", node.title)
-                raw_chunks = _chunk_sliding(text, target_chars=target, max_chars=max_c)
+                    logger.debug("Using mixed-content chunking for %r", node.title)
+                raw_chunks = _chunk_mixed_content(text, target_chars=target, max_chars=max_c)
 
             raw_chunks = [c.strip() for c in raw_chunks if c.strip()]
 
@@ -165,17 +167,29 @@ def chunk_document(node: DocumentNode) -> list[DocumentNode]:
 
 
 # ---------------------------------------------------------------------------
-# Strategy 1 — Table / CSV row splitting
+# Document-type detection
 # ---------------------------------------------------------------------------
 
 
-def _is_table_document(text: str) -> bool:
-    """Return True if the majority of non-empty lines look like Markdown table rows."""
+def _detect_document_type(text: str) -> str:
+    """
+    Return 'table' if the document is a pure CSV/table (>=95% pipe lines),
+    otherwise 'mixed'.
+
+    A 95% threshold (rather than 100%) gracefully handles trailing blank
+    lines or stray separator characters that would otherwise disqualify a
+    genuine CSV-to-Markdown output.
+    """
     non_empty = [ln for ln in text.splitlines() if ln.strip()]
     if not non_empty:
-        return False
+        return "mixed"
     table_lines = sum(1 for ln in non_empty if ln.strip().startswith("|"))
-    return (table_lines / len(non_empty)) >= TABLE_LINE_RATIO
+    return "table" if (table_lines / len(non_empty)) >= _PURE_TABLE_THRESHOLD else "mixed"
+
+
+# ---------------------------------------------------------------------------
+# Strategy 1 — Pure table / CSV row splitting
+# ---------------------------------------------------------------------------
 
 
 def _chunk_table(text: str) -> list[str]:
@@ -244,7 +258,116 @@ def _chunk_table(text: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Strategy 2 — Sliding-window with overlap  (all non-table documents)
+# Strategy 2 — Mixed content with table-boundary protection
+# ---------------------------------------------------------------------------
+
+
+def _split_into_semantic_blocks(text: str) -> list[str]:
+    """Split text into blocks at two-or-more consecutive newlines."""
+    raw_blocks = re.split(r"\n{2,}", text)
+    return [b.strip() for b in raw_blocks if b.strip()]
+
+
+def _is_table_block(block: str) -> bool:
+    """True if >=90% of non-empty lines in the block look like Markdown table rows."""
+    lines = [ln for ln in block.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    table_lines = sum(1 for ln in lines if ln.strip().startswith("|"))
+    return (table_lines / len(lines)) >= _BLOCK_TABLE_THRESHOLD
+
+
+def _get_overlap(text: str) -> str:
+    """Return the last CHUNK_OVERLAP_CHARS characters of text for use as an overlap prefix."""
+    return text[-CHUNK_OVERLAP_CHARS:] if len(text) > CHUNK_OVERLAP_CHARS else text
+
+
+def _chunk_mixed_content(
+    text: str,
+    target_chars: int = CHUNK_TARGET_CHARS,
+    max_chars: int = CHUNK_MAX_CHARS,
+) -> list[str]:
+    """
+    Chunk mixed content (prose + tables) by protecting table boundaries.
+
+    Strategy:
+    - Split the document into semantic blocks at double-newline boundaries.
+    - Table blocks are never split; they are always kept intact.
+    - Prose blocks use the existing sliding-window chunker with overlap.
+    - Accumulate blocks into a current_chunk until it would exceed max_chars,
+      then flush and start a new chunk.
+    - The last CHUNK_OVERLAP_CHARS of a flushed prose section are prepended
+      to the next chunk so boundary content stays findable from either side.
+    """
+    blocks = _split_into_semantic_blocks(text)
+
+    if not blocks:
+        return [text]
+
+    result: list[str] = []
+    current_parts: list[str] = []  # accumulated block strings for the current chunk
+    current_len: int = 0
+    overlap_prefix: str = ""
+
+    def _flush(extra_block: str = "", is_table_flush: bool = False) -> None:
+        nonlocal current_parts, current_len, overlap_prefix
+        content = "\n\n".join(current_parts).strip()
+        if extra_block:
+            content = (content + "\n\n" + extra_block).strip() if content else extra_block.strip()
+        full = (overlap_prefix + "\n\n" + content).strip() if overlap_prefix else content
+        if full:
+            result.append(full)
+        # Tables are self-contained units — do not bleed table content into the
+        # next chunk's overlap prefix.  Overlap is only meaningful for prose.
+        overlap_prefix = "" if is_table_flush else (_get_overlap(content) if content else "")
+        current_parts = []
+        current_len = 0
+
+    for block in blocks:
+        if _is_table_block(block):
+            # Tables must stay intact and are never merged with other tables
+            combined_len = current_len + len(block) + (2 if current_parts else 0)
+            if current_parts and combined_len > max_chars:
+                # Flush accumulated prose before the table
+                _flush()
+            # Flush the table itself (with any preceding prose) as its own chunk
+            _flush(block, is_table_flush=True)
+        else:
+            # Prose block — try to accumulate
+            addition = len(block) + (2 if current_parts else 0)
+            if current_parts and (current_len + addition) > max_chars:
+                # Current chunk is full — flush it, then try a sliding-window split
+                # on the incoming block in case it's individually too large
+                _flush()
+
+            if len(block) > max_chars:
+                # Single prose block larger than max_chars — use sliding-window split
+                sub_chunks = _chunk_sliding(block, target_chars=target_chars, max_chars=max_chars)
+                for i, sc in enumerate(sub_chunks):
+                    if i < len(sub_chunks) - 1:
+                        full = (overlap_prefix + "\n\n" + sc).strip() if overlap_prefix else sc
+                        result.append(full)
+                        overlap_prefix = _get_overlap(sc)
+                    else:
+                        # Last sub-chunk: carry it forward for accumulation.
+                        # Reset overlap_prefix — the sub-chunk already embeds overlap
+                        # from _chunk_sliding; we must not prepend it again in _flush.
+                        overlap_prefix = ""
+                        current_parts = [sc]
+                        current_len = len(sc)
+            else:
+                current_parts.append(block)
+                current_len += addition
+
+    # Flush any remaining content
+    if current_parts:
+        _flush()
+
+    return result if result else [text]
+
+
+# ---------------------------------------------------------------------------
+# Strategy 3 — Sliding-window with overlap  (prose blocks / fallback)
 # ---------------------------------------------------------------------------
 
 

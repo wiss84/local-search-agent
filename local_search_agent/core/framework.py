@@ -517,3 +517,86 @@ class SearchAgentFramework:
             "enable_semantic": self.config.enable_semantic,
             "enable_query_expansion": self.config.enable_query_expansion,
         }
+
+    def get_advanced_settings(self) -> dict:
+        """
+        Return the effective ingestion / search constants, merging any
+        user overrides on top of the compiled-in defaults from constants.py.
+
+        The returned dict always contains every key; overridden keys are
+        the user-set values, non-overridden keys are the constants.py defaults.
+
+        Returns
+        -------
+        dict with keys matching ``_ADVANCED_SETTING_KEYS`` in key_manager.py:
+        ``CHUNK_MIN_CHARS``, ``CHUNK_TARGET_CHARS``, ``CHUNK_MAX_CHARS``,
+        ``CHUNK_OVERLAP_CHARS``, ``TABLE_ROWS_PER_CHUNK``,
+        ``PDF_PAGES_PER_BATCH``, ``PDF_SPLIT_THRESHOLD``,
+        ``PDF_FALLBACK_PAGES_PER_BATCH``, ``DOCX_CHAR_SPLIT_THRESHOLD``,
+        ``TESSERACT_FALLBACK_MIN_CHARS``, ``DEFAULT_TOP_K``,
+        ``DEFAULT_MAX_ITERATIONS``, ``SNIPPET_CONTEXT_CHARS``.
+
+        Example
+        -------
+        ```python
+        settings = framework.get_advanced_settings()
+        print(settings["PDF_PAGES_PER_BATCH"])   # 20 (or user override)
+        ```
+        """
+        from local_search_agent.core.key_manager import get_effective_constants
+
+        return get_effective_constants()
+
+    def set_advanced_settings(self, overrides: dict) -> dict:
+        """
+        Persist ingestion / search constant overrides to ``advanced_settings.json``
+        in the user config directory.
+
+        Overrides take effect on the **next** ingest run.  Pass an empty dict
+        to reset everything back to the compiled-in defaults.
+
+        Unknown keys and values that cannot be coerced to the expected numeric
+        type are silently ignored.
+
+        Parameters
+        ----------
+        overrides : dict
+            Mapping of constant name → new value.  Valid keys::
+
+                CHUNK_MIN_CHARS, CHUNK_TARGET_CHARS, CHUNK_MAX_CHARS,
+                CHUNK_OVERLAP_CHARS, TABLE_ROWS_PER_CHUNK,
+                PDF_PAGES_PER_BATCH, PDF_SPLIT_THRESHOLD,
+                PDF_FALLBACK_PAGES_PER_BATCH, DOCX_CHAR_SPLIT_THRESHOLD,
+                TESSERACT_FALLBACK_MIN_CHARS, DEFAULT_TOP_K,
+                DEFAULT_MAX_ITERATIONS, SNIPPET_CONTEXT_CHARS
+
+        Returns
+        -------
+        dict — the effective constants after applying the overrides (same as
+        ``get_advanced_settings()``).
+
+        Examples
+        --------
+        ```python
+        # Lower batch size for machines with limited RAM
+        framework.set_advanced_settings({
+            "PDF_PAGES_PER_BATCH": 10,
+            "CHUNK_TARGET_CHARS": 8000,
+        })
+        framework.ingest_and_index(force=True)
+
+        # Reset everything back to defaults
+        framework.set_advanced_settings({})
+        ```
+        """
+        from local_search_agent.core.key_manager import (
+            get_effective_constants,
+        )
+        from local_search_agent.core.key_manager import (
+            set_advanced_settings as _set,
+        )
+
+        _set(overrides)
+        effective = get_effective_constants()
+        logger.info("Advanced settings updated: %s", overrides)
+        return effective

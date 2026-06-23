@@ -325,7 +325,54 @@ local-search query --workspace finance   # Interactive mode
 
 ---
 
+## watch
+
+Filesystem event-driven re-ingestion. Reacts to file changes instantly without polling. **Recommended over the polling scheduler** for most use cases.
+
+### watch start
+
+```bash
+local-search watch start --workspace <name> [--no-enrich]
+```
+
+Start watch mode as a foreground process. Blocks until interrupted (Ctrl+C). Watches all document directories in the workspace and re-indexes within seconds of file changes.
+
+| Option | Description |
+|--------|-------------|
+| `--workspace` | Workspace to watch |
+| `--no-enrich` | Skip semantic enrichment on watch-triggered syncs (faster, but you may need a later full re-ingest to backfill semantic fields) |
+
+```bash
+# Start watching a workspace with semantic enrichment (default)
+local-search watch start --workspace finance
+
+# Start watching but skip semantic enrichment for speed
+local-search watch start --workspace finance --no-enrich
+```
+
+### watch status
+
+```bash
+local-search watch status
+```
+
+Show which workspaces and directories are currently being watched. Returns "Watch mode is not running." if no watcher is active.
+
+```bash
+local-search watch status
+# Output:
+# Watch mode running -- 2 workspace(s)
+#   finance: 2 directory(ies)
+#   legal: 1 directory(ies)
+```
+
+---
+
 ## scheduler
+
+⚠️ **DEPRECATED** — Use `watch start` instead. Watch mode is event-driven and reacts instantly to file changes without polling delays.
+
+The polling-based scheduler is kept for backward compatibility but is no longer recommended. It will be removed in a future major version.
 
 ### scheduler status
 
@@ -333,17 +380,23 @@ local-search query --workspace finance   # Interactive mode
 local-search scheduler status
 ```
 
+*Deprecated.* Use `watch status` instead.
+
 ### scheduler start
 
 ```bash
 local-search scheduler start --workspace <name> [--interval <minutes>]
 ```
 
+*Deprecated.* Use `watch start` instead.
+
 ### scheduler trigger
 
 ```bash
 local-search scheduler trigger --workspace <name> [--force]
 ```
+
+*Deprecated.* Use `watch trigger` (not yet implemented) or manual sync.
 
 ---
 

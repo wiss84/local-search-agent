@@ -105,13 +105,17 @@ class IngestionPipeline:
     # Public API
     # ------------------------------------------------------------------
 
-    def run(self, force: bool = False, progress_callback=None) -> IngestStats:
+    def run(self, force: bool = False, enrich: bool = True, progress_callback=None) -> IngestStats:
         """
         Run a full ingestion pass over all configured document directories.
 
         Parameters
         ----------
         force             : Re-index all files regardless of modification time.
+        enrich            : Whether to run semantic enrichment for this run (only
+                            takes effect if config.enable_semantic is also True).
+                            Set to False for fast, LLM-free reindexing — used by
+                            Watch Mode when enrich_on_watch is disabled.
         progress_callback : Optional callable(indexed, skipped, failed, total, current_file)
                             called after each file is processed. Used by the UI
                             to report live progress without polling the DB.
@@ -142,7 +146,8 @@ class IngestionPipeline:
 
             nodes = self._parse_file(file_path, stats)
             if nodes:
-                self._enrich_batch(nodes)
+                if enrich:
+                    self._enrich_batch(nodes)
                 self._flush_batch(nodes, stats)
                 stats.files_indexed += 1
 

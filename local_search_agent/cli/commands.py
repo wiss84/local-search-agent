@@ -579,7 +579,7 @@ def cmd_scheduler_start(args: argparse.Namespace) -> None:
 
 
 def cmd_scheduler_status(args: argparse.Namespace) -> None:
-    """Show scheduler status -- which workspaces are scheduled and next run times."""
+    """DEPRECATED (use 'watch status'): Show scheduler status -- which workspaces are scheduled and next run times."""
     from local_search_agent.core.config import SearchAgentConfig
     from local_search_agent.core.framework import SearchAgentFramework
 
@@ -603,7 +603,7 @@ def cmd_scheduler_status(args: argparse.Namespace) -> None:
 
 
 def cmd_scheduler_trigger(args: argparse.Namespace) -> None:
-    """Trigger an immediate sync for a workspace."""
+    """DEPRECATED (use 'watch trigger'): Trigger an immediate sync for a workspace."""
     from local_search_agent.core.config import SearchAgentConfig
     from local_search_agent.core.framework import SearchAgentFramework
 
@@ -614,6 +614,92 @@ def cmd_scheduler_trigger(args: argparse.Namespace) -> None:
         meili_master_key=args.meili_key,
         provider="ollama",
         db_path=args.db,
+    )
+    framework = SearchAgentFramework(config)
+    print(f"Triggering immediate sync for workspace {args.workspace!r} ...")
+    stats = framework.ingest_and_index(force=args.force)
+    print(f"Done. {stats}")
+
+
+# ---------------------------------------------------------------------------
+# watch (filesystem-event-driven, replaces the polling scheduler)
+# ---------------------------------------------------------------------------
+
+
+def cmd_watch_start(args: argparse.Namespace) -> None:
+    """Start Watch Mode as a foreground process (blocks). Reacts to file changes instantly."""
+    import signal
+    import time
+
+    from local_search_agent.core.config import SearchAgentConfig
+    from local_search_agent.core.framework import SearchAgentFramework
+
+    config = SearchAgentConfig(
+        document_dirs=args.dirs or [],
+        workspace_name=args.workspace,
+        meilisearch_url=args.meili_url,
+        meili_master_key=args.meili_key,
+        provider="ollama",
+        db_path=args.db,
+        enrich_on_watch=not args.no_enrich,
+    )
+    framework = SearchAgentFramework(config)
+
+    if args.dirs:
+        for d in args.dirs:
+            framework.create_workspace(name=args.workspace, document_dir=d)
+
+    framework.start_watch_mode()
+    print(
+        f"Watch mode running (workspace={args.workspace!r}, "
+        f"enrich_on_watch={not args.no_enrich}). Press Ctrl+C to stop."
+    )
+
+    def _shutdown(sig, frame):
+        print("\nShutting down watch mode...")
+        framework.stop_watch_mode()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    while True:
+        time.sleep(5)
+
+
+def cmd_watch_status(args: argparse.Namespace) -> None:
+    """Show watch-mode status -- which workspaces/directories are being watched."""
+    from local_search_agent.core.config import SearchAgentConfig
+    from local_search_agent.core.framework import SearchAgentFramework
+
+    config = SearchAgentConfig(workspace_name="default", db_path=args.db)
+    framework = SearchAgentFramework(config)
+    status = framework.get_watch_mode_status()
+
+    if not status["running"]:
+        print("Watch mode is not running.")
+        return
+
+    watched = status.get("watched_directories", {})
+    print(f"Watch mode running -- {len(watched)} workspace(s)")
+    print("-" * 60)
+    for workspace, dir_count in watched.items():
+        print(f"  workspace={workspace:<25} watched_directories={dir_count}")
+
+
+def cmd_watch_trigger(args: argparse.Namespace) -> None:
+    """Trigger an immediate sync for a workspace (bypassing the debounce window)."""
+    from local_search_agent.core.config import SearchAgentConfig
+    from local_search_agent.core.framework import SearchAgentFramework
+
+    config = SearchAgentConfig(
+        document_dirs=args.dirs or [],
+        workspace_name=args.workspace,
+        meilisearch_url=args.meili_url,
+        meili_master_key=args.meili_key,
+        provider="ollama",
+        db_path=args.db,
+        enrich_on_watch=not args.no_enrich,
     )
     framework = SearchAgentFramework(config)
     print(f"Triggering immediate sync for workspace {args.workspace!r} ...")
@@ -861,10 +947,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--meili-key", default="local_search_master_key")
     p_serve.add_argument("--dirs", nargs="*", metavar="DIR")
     p_serve.add_argument(
-        "--scheduler", action="store_true", help="Also start the incremental sync scheduler."
+        "--scheduler",
+        action="store_true",
+        help="(deprecated, use 'local-search watch start') Also start the incremental sync scheduler.",
     )
     p_serve.add_argument(
-        "--interval", type=int, default=15, help="Scheduler interval in minutes (default 15)."
+        "--interval",
+        type=int,
+        default=15,
+        help="(deprecated) Scheduler interval in minutes (default 15).",
     )
     p_serve.set_defaults(func=cmd_serve)
 
@@ -918,16 +1009,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_query.add_argument("--top-k", type=int, default=5)
     p_query.set_defaults(func=cmd_query)
 
-    # -- scheduler -----------------------------------------------------------
-    p_sched = sub.add_parser("scheduler", help="Manage the incremental sync scheduler.")
+    # -- scheduler -------------------------------------------------------------
+    p_sched = sub.add_parser(
+        "scheduler",
+        help="(deprecated, use 'watch') Manage the polling-based incremental sync scheduler.",
+    )
     sched_sub = p_sched.add_subparsers(dest="sched_command", required=True)
 
     p_sched_status = sched_sub.add_parser(
-        "status", help="Show scheduler status and next run times."
+        "status",
+        help="(deprecated, use 'watch status') Show scheduler status and next run times.",
     )
     p_sched_status.set_defaults(func=cmd_scheduler_status)
 
-    p_sched_start = sched_sub.add_parser("start", help="Run the scheduler as a foreground process.")
+    p_sched_start = sched_sub.add_parser(
+        "start",
+        help="(deprecated, use 'watch start') Run the scheduler as a foreground process.",
+    )
     p_sched_start.add_argument("--workspace", default="default")
     p_sched_start.add_argument("--dirs", nargs="*", metavar="DIR")
     p_sched_start.add_argument("--meili-url", default="http://localhost:7700")
@@ -937,13 +1035,56 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_sched_start.set_defaults(func=cmd_scheduler_start)
 
-    p_sched_trigger = sched_sub.add_parser("trigger", help="Trigger an immediate one-off sync.")
+    p_sched_trigger = sched_sub.add_parser(
+        "trigger",
+        help="(deprecated, use 'watch trigger') Trigger an immediate one-off sync.",
+    )
     p_sched_trigger.add_argument("--workspace", default="default")
     p_sched_trigger.add_argument("--dirs", nargs="*", metavar="DIR")
     p_sched_trigger.add_argument("--meili-url", default="http://localhost:7700")
     p_sched_trigger.add_argument("--meili-key", default="local_search_master_key")
     p_sched_trigger.add_argument("--force", action="store_true", help="Force full re-index.")
     p_sched_trigger.set_defaults(func=cmd_scheduler_trigger)
+
+    # -- watch (filesystem-event-driven, recommended) -------------------------
+    p_watch = sub.add_parser(
+        "watch", help="Manage Watch Mode (filesystem-event-driven incremental sync)."
+    )
+    watch_sub = p_watch.add_subparsers(dest="watch_command", required=True)
+
+    p_watch_status = watch_sub.add_parser(
+        "status", help="Show watch-mode status and watched directories."
+    )
+    p_watch_status.set_defaults(func=cmd_watch_status)
+
+    p_watch_start = watch_sub.add_parser(
+        "start", help="Run watch mode as a foreground process (reacts to file changes instantly)."
+    )
+    p_watch_start.add_argument("--workspace", default="default")
+    p_watch_start.add_argument("--dirs", nargs="*", metavar="DIR")
+    p_watch_start.add_argument("--meili-url", default="http://localhost:7700")
+    p_watch_start.add_argument("--meili-key", default="local_search_master_key")
+    p_watch_start.add_argument(
+        "--no-enrich",
+        action="store_true",
+        help="Skip semantic enrichment on watch-triggered syncs (faster, no LLM calls).",
+    )
+    p_watch_start.set_defaults(func=cmd_watch_start)
+
+    p_watch_trigger = watch_sub.add_parser(
+        "trigger", help="Trigger an immediate one-off sync, bypassing the debounce window."
+    )
+    p_watch_trigger.add_argument("--workspace", default="default")
+    p_watch_trigger.add_argument("--dirs", nargs="*", metavar="DIR")
+    p_watch_trigger.add_argument("--meili-url", default="http://localhost:7700")
+    p_watch_trigger.add_argument("--meili-key", default="local_search_master_key")
+    p_watch_trigger.add_argument("--force", action="store_true", help="Force full re-index.")
+    p_watch_trigger.add_argument(
+        "--no-enrich",
+        action="store_true",
+        help="Skip semantic enrichment for this sync (faster, no LLM calls).",
+    )
+    p_watch_trigger.set_defaults(func=cmd_watch_trigger)
 
     # -- health --------------------------------------------------------------
     p_health = sub.add_parser("health", help="Show index health across all workspaces.")

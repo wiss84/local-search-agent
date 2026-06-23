@@ -42,7 +42,9 @@ Meilisearch downloads and starts automatically on first run. The desktop window 
 
 ## CLI Quick Start
 
-If you prefer the terminal, you need two terminals — one for the file server, one for queries.
+If you prefer the terminal, you have two options:
+
+**Option A: Watch Mode (recommended)**  — Reacts to file changes instantly without polling.
 
 #### Create a workspace
 
@@ -62,39 +64,29 @@ Ingesting ['C:\my_docs'] into workspace 'my_workspace' ...
 Done. IngestStats(total=12, indexed=12, skipped=0, failed=0, duration=18.4s)
 ```
 
-#### Start the file server
+#### Start watch mode (blocks; Ctrl+C to stop)
 
-Keep this running in terminal 1:
+```bash
+local-search watch start --workspace my_workspace
+```
+
+#### In another terminal, start the file server
 
 ```bash
 local-search serve --workspace my_workspace
 ```
 
-#### Ask a question
-
-In terminal 2:
+#### Ask a question (in a third terminal)
 
 ```bash
 local-search query "What was the AWS spend in Q3?" --workspace my_workspace --provider google
 ```
 
-Interactive Mode:
+---
 
-```bash
-local-search query --workspace finance --provider google
-```
+**Option B: Polling Scheduler (deprecated)**  — Falls back to polling at fixed intervals. Use watch mode instead.
 
-For Ollama:
-
-```bash
-local-search query "What was the AWS spend in Q3?" --workspace my_workspace --provider ollama --model mistral
-```
-
-#### Check health
-
-```bash
-local-search health
-```
+Skip ahead to the Python API Quick Start or consult the [CLI Reference](cli-reference.md#scheduler) for deprecated scheduler commands.
 
 ---
 
@@ -114,10 +106,19 @@ config = SearchAgentConfig(
 framework = SearchAgentFramework(config)
 framework.ingest_and_index()
 framework.start_file_server()
-framework.start_incremental_scheduler(interval_minutes=15)
+
+# Option A: Watch mode (recommended) — reacts to file changes instantly
+framework.set_watch_mode_settings(enable_watch_mode=True, enrich_on_watch=True)
+framework.start_watch_mode()  # non-blocking, runs in background thread
+
+# Option B: Polling scheduler (deprecated) — use watch mode instead
+# framework.start_incremental_scheduler(interval_minutes=15)
 
 response = framework.query("What was the AWS spend in Q3?")
 print(response["answer"])
+
+# Later, stop watch mode
+# framework.stop_watch_mode()
 ```
 
 ---
@@ -141,6 +142,21 @@ print(response["answer"])
 
 - [CLI Reference](cli-reference.md) — all commands and flags
 - [Python API Reference](api-reference.md) — full API documentation
-- [Configuration Guide](configuration.md) — all config options
+- [Configuration Guide](configuration.md) — all config options, including watch mode and re-ranking
 - [Multi-Workspace Guide](multi-workspace.md) — managing multiple document collections
 - [Semantic Search](semantic-search.md) — optional AI-powered search enhancement
+
+---
+
+## Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **BM25 Search** | Deterministic, auditable keyword search via Meilisearch |
+| **Re-ranking** | Cross-encoder re-scoring (flashrank) improves relevance of top results. Enabled by default. |
+| **Watch Mode** | Filesystem-driven re-ingestion. Reacts to file changes within seconds. |
+| **Semantic Search** | Optional AI-powered concept extraction + query expansion (ConceptCompiler, StructuralParser) |
+| **Multi-format** | PDFs, Word, Excel, HTML, CSV, JSON, Markdown, plain text, email |
+| **PDF OCR** | Tiered strategy: native text → Tesseract → RapidOCR (automatic fallback) |
+| **Local-first** | No cloud upload. All computation happens on your machine. |
+| **Desktop UI** | Native OS window (pywebview) for easy document management and queries |

@@ -51,6 +51,7 @@ class SearchAgentFramework:
         self._metadata_db = MetadataDB(db_path=config.db_path)
         self._meili_client = None
         self._scheduler = None
+        self._watcher = None
         self._meili_manager = None
         # Activate LangSmith tracing if credentials are saved
         from local_search_agent.core.key_manager import apply_langsmith_env
@@ -87,6 +88,12 @@ class SearchAgentFramework:
         return self._meili_client
 
     def _get_scheduler(self):
+        """
+        DEPRECATED: the polling-based IncrementalSyncScheduler is kept for
+        backward compatibility. New code should use start_watch_mode() /
+        _get_watcher() instead, which reacts to filesystem events directly
+        rather than polling on a fixed interval.
+        """
         if self._scheduler is None:
             from local_search_agent.scheduler.incremental_sync import IncrementalSyncScheduler
 
@@ -96,6 +103,16 @@ class SearchAgentFramework:
                 interval_minutes=15,
             )
         return self._scheduler
+
+    def _get_watcher(self):
+        if self._watcher is None:
+            from local_search_agent.scheduler.watch_mode import WorkspaceWatcher
+
+            self._watcher = WorkspaceWatcher(
+                workspace_manager=self._workspace_manager,
+                metadata_db=self._metadata_db,
+            )
+        return self._watcher
 
     # ------------------------------------------------------------------
     # Phase 1: File Server
@@ -255,6 +272,8 @@ class SearchAgentFramework:
         self._workspace_manager.delete_workspace(name)
         if self._scheduler:
             self._scheduler.remove_workspace(name)
+        if self._watcher:
+            self._watcher.remove_workspace(name)
         logger.info("Workspace deleted: %r (wipe_index=%s)", name, wipe_index)
 
     def ingest_workspace(self, workspace_name: str, force: bool = False):
@@ -348,7 +367,12 @@ class SearchAgentFramework:
 
     def start_incremental_scheduler(self, interval_minutes: int = 15) -> None:
         """
-        Start the APScheduler background job for incremental re-ingestion.
+        DEPRECATED (polling-based, use 'watch'): Start the APScheduler background
+        job for incremental re-ingestion.
+
+        Kept for backward compatibility. New code should prefer
+        start_watch_mode(), which reacts to filesystem changes via watchdog
+        instead of polling on a fixed interval.
 
         Registers the current framework config's workspace and starts
         the scheduler. Additional workspaces can be added via
@@ -393,9 +417,105 @@ class SearchAgentFramework:
         )
 
     def stop_incremental_scheduler(self) -> None:
-        """Gracefully stop the incremental scheduler."""
+        """DEPRECATED (polling-based, use 'watch'): Gracefully stop the incremental scheduler."""
         if self._scheduler:
             self._scheduler.stop()
+
+    # ------------------------------------------------------------------
+    # Watch mode (filesystem-event-driven, replaces the polling scheduler)
+    # ------------------------------------------------------------------
+
+    def start_watch_mode(self) -> None:
+        """
+        Start filesystem-event-driven watching for incremental re-ingestion.
+
+        Reacts to file creates/modifies/deletes within config.document_dirs
+        almost immediately (after a short debounce window), instead of
+        waiting for a fixed polling interval like start_incremental_scheduler().
+
+        Registers the current framework config's workspace, plus any other
+        workspaces already in the DB, mirroring start_incremental_scheduler().
+        Whether watch-triggered syncs run semantic enrichment is controlled
+        by config.enrich_on_watch.
+
+        Example
+        -------
+        ```python
+        framework.start_watch_mode()
+        ```
+        """
+        watcher = self._get_watcher()
+        watcher.start()
+
+        # Register the primary workspace
+        watcher.add_workspace(self.config)
+
+        # Also register any other workspaces already in the DB
+        for ws in self._workspace_manager.list_workspaces():
+            if ws["name"] != self.config.workspace_name:
+                from local_search_agent.core.config import SearchAgentConfig
+
+                ws_config = SearchAgentConfig(
+                    document_dirs=[ws["document_dir"]],
+                    workspace_name=ws["name"],
+                    meilisearch_url=self.config.meilisearch_url,
+                    meili_master_key=self.config.meili_master_key,
+                    index_name=ws["name"],
+                    provider=self.config.provider,
+                    api_key=self.config.api_key,
+                    model_name=self.config.model_name,
+                    db_path=self.config.db_path,
+                    enrich_on_watch=self.config.enrich_on_watch,
+                )
+                watcher.add_workspace(ws_config)
+
+        logger.info(
+            "Watch mode started (workspaces=%d, enrich_on_watch=%s).",
+            len(watcher._workspace_configs),
+            self.config.enrich_on_watch,
+        )
+
+    def stop_watch_mode(self) -> None:
+        """Gracefully stop watch mode and its filesystem observer thread."""
+        if self._watcher:
+            self._watcher.stop()
+
+    def add_workspace_to_watch_mode(self, workspace_name: str) -> None:
+        """
+        Add an already-registered workspace to watch mode.
+
+        Parameters
+        ----------
+        workspace_name : Name of an existing workspace (must be in WorkspaceManager).
+        """
+        ws = self._workspace_manager.get_workspace(workspace_name)
+        if ws is None:
+            raise ValueError(
+                f"Workspace {workspace_name!r} not found. Call create_workspace() first."
+            )
+
+        from local_search_agent.core.config import SearchAgentConfig
+
+        ws_config = SearchAgentConfig(
+            document_dirs=[ws["document_dir"]],
+            workspace_name=workspace_name,
+            meilisearch_url=self.config.meilisearch_url,
+            meili_master_key=self.config.meili_master_key,
+            index_name=workspace_name,
+            provider=self.config.provider,
+            api_key=self.config.api_key,
+            model_name=self.config.model_name,
+            db_path=self.config.db_path,
+            enrich_on_watch=self.config.enrich_on_watch,
+        )
+        self._get_watcher().add_workspace(ws_config)
+        logger.info("Workspace %r added to watch mode.", workspace_name)
+
+    def get_watch_mode_status(self) -> dict:
+        """Return current watch-mode status (running, watched workspaces/directories)."""
+        if self._watcher is None:
+            return {"running": False, "registered_workspaces": [], "watched_directories": {}}
+        return self._watcher.get_status()
 
     def add_workspace_to_scheduler(
         self,
@@ -433,9 +553,19 @@ class SearchAgentFramework:
         logger.info("Workspace %r added to scheduler.", workspace_name)
 
     def trigger_sync_now(self, workspace_name: Optional[str] = None) -> None:
-        """Force an immediate sync for a workspace outside the normal schedule."""
+        """
+        Force an immediate sync for a workspace outside the normal schedule.
+
+        If watch mode is running and the workspace is registered with it,
+        the watcher's trigger_now() is used (debounce-bypassing). Otherwise
+        falls back to the polling scheduler's trigger_now() for backward
+        compatibility.
+        """
         name = workspace_name or self.config.workspace_name
-        self._get_scheduler().trigger_now(name)
+        if self._watcher is not None and name in self._watcher._workspace_configs:
+            self._watcher.trigger_now(name)
+        else:
+            self._get_scheduler().trigger_now(name)
 
     # ------------------------------------------------------------------
     # Phase 4: Health monitoring
@@ -516,6 +646,53 @@ class SearchAgentFramework:
         return {
             "enable_semantic": self.config.enable_semantic,
             "enable_query_expansion": self.config.enable_query_expansion,
+        }
+
+    def set_watch_mode_settings(self, enable_watch_mode: bool, enrich_on_watch: bool) -> None:
+        """
+        Update watch-mode feature flags at runtime and persist them to settings.json.
+
+        Parameters
+        ----------
+        enable_watch_mode : Whether watch mode should be used (informational here;
+                            actually starting/stopping it is done via
+                            start_watch_mode()/stop_watch_mode()).
+        enrich_on_watch    : Whether watch-triggered re-ingests also run semantic
+                            enrichment (only relevant if enable_semantic is True).
+
+        Example
+        -------
+        ```python
+        framework.set_watch_mode_settings(enable_watch_mode=True, enrich_on_watch=False)
+        ```
+        """
+        from local_search_agent.core.key_manager import set_all_watch_mode_settings
+
+        self.config.enable_watch_mode = enable_watch_mode
+        self.config.enrich_on_watch = enrich_on_watch
+
+        set_all_watch_mode_settings(
+            enable_watch_mode=enable_watch_mode,
+            enrich_on_watch=enrich_on_watch,
+        )
+
+        logger.info(
+            "Watch mode settings updated: enable_watch_mode=%s, enrich_on_watch=%s",
+            enable_watch_mode,
+            enrich_on_watch,
+        )
+
+    def get_watch_mode_settings(self) -> dict[str, bool]:
+        """
+        Return the current watch-mode feature flag settings.
+
+        Returns
+        -------
+        dict with keys: ``enable_watch_mode``, ``enrich_on_watch``
+        """
+        return {
+            "enable_watch_mode": self.config.enable_watch_mode,
+            "enrich_on_watch": self.config.enrich_on_watch,
         }
 
     def get_advanced_settings(self) -> dict:

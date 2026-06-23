@@ -34,27 +34,69 @@
   </div>
 </div>
 
-<!-- Scheduler Modal -->
+<!-- Sync Modal (Watch Mode / Polling Scheduler / Off) -->
 <div class="modal-overlay hidden" id="modal-scheduler">
   <div class="modal">
-    <div class="modal-title">Ingestion Scheduler</div>
+    <div class="modal-title">Ingestion Sync</div>
     <div class="modal-field">
       <label class="modal-label">Workspace</label>
       <select class="modal-input" id="sched-workspace-select"></select>
     </div>
+
     <div class="modal-field">
+      <label class="modal-label">Sync mode</label>
+      <select class="modal-input" id="sync-mode-select">
+        <option value="off">Off &mdash; manual ingest only</option>
+        <option value="watch" selected>Watch Mode &mdash; react to file changes instantly</option>
+        <option value="scheduler">Scheduler &mdash; poll on a fixed interval</option>
+      </select>
+    </div>
+
+    <!-- Polling-only field -->
+    <div class="modal-field hidden" id="sched-interval-field">
       <label class="modal-label">Sync interval (minutes)</label>
       <input type="number" class="modal-input" id="sched-interval-input" value="15" min="1" max="1440" />
     </div>
+
+    <!-- Watch-mode-only field -->
+    <div class="toggle-row" id="sched-enrich-on-watch-field">
+      <div>
+        <div class="toggle-label">Enrich on Watch</div>
+        <div class="toggle-desc">Run semantic enrichment for watch-triggered syncs too (only applies if Semantic Indexing is enabled).</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="toggle-enrich-on-watch" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
     <div class="modal-actions">
       <button class="modal-btn ghost" id="btn-sched-cancel">Cancel</button>
-      <button class="modal-btn lp-btn-danger" id="btn-sched-stop" style="margin-right:auto">Stop Scheduler</button>
       <button class="modal-btn primary" id="btn-sched-save">Save</button>
     </div>
   </div>
 </div>
 
-<!-- Ingest Toast -->
+<!-- Document Preview Panel -->
+<div id="preview-panel" class="preview-panel hidden">
+  <div class="preview-header">
+    <div class="preview-title" id="preview-title">Document Preview</div>
+    <div class="preview-meta" id="preview-meta"></div>
+    <button class="preview-close" id="btn-preview-close" title="Close preview">
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+        <line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/>
+      </svg>
+      Close
+    </button>
+  </div>
+  <div class="preview-body" id="preview-body">
+    <div class="preview-loading">Loading…</div>
+  </div>
+  <div class="preview-footer">
+    <button class="modal-btn ghost" id="btn-preview-open-file" title="Open original file">Open file</button>
+    <button class="modal-btn ghost" id="btn-preview-copy-text" title="Copy full text">Copy text</button>
+  </div>
+</div>
 <div id="ingest-toast" class="hidden">
   <div class="tool-spinner"></div>
   <span id="ingest-toast-msg">Ingesting…</span>
@@ -209,6 +251,25 @@
           </select>
         </div>
         <p style="font-size:10px;color:var(--text-muted);margin:0">&#8505; Add models first via the <strong>Model Manager</strong> tab &mdash; they will appear here automatically.</p>
+      </div>
+
+      <div style="margin-top:12px;font-size:11px;font-weight:600;color:var(--text-muted);letter-spacing:0.05em;">RE-RANKING</div>
+
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Enable Re-ranking</div>
+          <div class="toggle-desc">Re-rank BM25 search results with a local cross-encoder (flashrank) for better relevance. Model downloads once (~17MB), runs fully offline. Recommended.</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="toggle-enable-reranking" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="modal-field" id="rerank-multiplier-field">
+        <label class="modal-label">Candidate multiplier <span style="font-weight:400;color:var(--text-muted);font-size:11px">(default 4)</span></label>
+        <input type="number" class="modal-input" id="rerank-multiplier-input" value="4" min="1" max="20" style="max-width:80px" />
+        <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Fetch top-k &times; this many BM25 candidates before re-ranking. Higher = better quality, slower.</div>
       </div>
 
       <button class="key-btn-save" id="btn-semantic-save" style="align-self:flex-start;margin-top:4px">Save</button>

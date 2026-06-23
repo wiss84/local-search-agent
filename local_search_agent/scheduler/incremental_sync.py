@@ -1,6 +1,12 @@
 """
 Incremental sync scheduler for the Local Search Agent framework.
 
+DEPRECATED: this polling-based scheduler is kept for backward compatibility.
+New code should prefer Watch Mode (local_search_agent.scheduler.watch_mode),
+which reacts to filesystem events via `watchdog` instead of polling on a
+fixed interval. See docs/watch-mode.md (or watch-mode section of the docs)
+for migration guidance.
+
 Runs a background APScheduler job that re-indexes changed documents
 across all registered workspaces on a configurable interval.
 
@@ -66,6 +72,16 @@ class IncrementalSyncScheduler:
         metadata_db,
         interval_minutes: int = 15,
     ):
+        import warnings
+
+        warnings.warn(
+            "IncrementalSyncScheduler (polling-based) is deprecated. "
+            "Use local_search_agent.scheduler.watch_mode.WorkspaceWatcher "
+            "(or framework.start_watch_mode()) instead, which reacts to "
+            "filesystem changes via watchdog instead of polling on a fixed interval.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._wm = workspace_manager
         self._db = metadata_db
         self._default_interval = interval_minutes

@@ -54,10 +54,17 @@
   <!-- ── Tools ── -->
   <div class="lp-section">
     <div class="lp-label">Tools</div>
-    <button class="lp-btn" id="btn-scheduler" title="Configure ingestion scheduler">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><polyline points="8,4 8,8 11,10"/></svg>
-      Scheduler
-    </button>
+    <div class="lp-sync-row">
+      <button class="lp-btn" id="btn-scheduler" title="Configure ingestion sync (Watch Mode or Scheduler)" style="flex:1">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><polyline points="8,4 8,8 11,10"/></svg>
+        Sync
+      </button>
+      <label class="toggle-switch lp-sync-toggle" title="Turn automatic sync on or off">
+        <input type="checkbox" id="toggle-sync-enabled">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div id="sync-status-hint" class="lp-sync-hint">Auto-sync is off</div>
     <button class="lp-btn lp-btn-accent" id="btn-export" title="Export conversation as Markdown">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V6z"/><polyline points="9,1 9,6 14,6"/></svg>
       Export Chat

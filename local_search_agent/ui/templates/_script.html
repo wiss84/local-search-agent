@@ -39,6 +39,7 @@ const state = {
   provider: 'google',
   model: 'gemma-4-31b-it',
   activeToolCards: {},
+  allAgentSearchQueries: [],  // Track all agent search queries for comprehensive highlighting
 };
 
 /* =============================================================
@@ -419,11 +420,128 @@ document.addEventListener('click', e => {
   if (!a) return;
   const href = a.getAttribute('href');
   if (!href) return;
+  // Skip doc preview links — handled by the preview panel interceptors below
+  if (href.match(/\/text\/[a-f0-9]+/) || href.match(/\/docs\/[a-f0-9]+/)) return;
   // Only intercept http/https and local file URLs
   if (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('file://')) {
     e.preventDefault();
     openExternalUrl(href);
   }
+});
+
+/* =============================================================
+   DOCUMENT PREVIEW PANEL
+   ============================================================= */
+const FILE_SERVER = 'http://127.0.0.1:{{ file_server_port }}';
+let _previewCurrentDocId = null;
+let _previewCurrentText  = null;
+
+async function openPreview(docId, query) {
+  _previewCurrentDocId = docId;
+  const panel = $('preview-panel');
+  $('preview-title').textContent = 'Loading…';
+  $('preview-meta').textContent  = '';
+  $('preview-body').innerHTML    = '<div class="preview-loading">Loading…</div>';
+  panel.classList.remove('hidden');
+
+  try {
+    const params = query ? `?query=${encodeURIComponent(query)}` : '';
+    const r = await fetch(`${FILE_SERVER}/preview/${encodeURIComponent(docId)}${params}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+
+    _previewCurrentText = data.text || '';
+    $('preview-title').textContent = data.title || docId;
+    $('preview-meta').textContent  = data.file_type ? data.file_type.toUpperCase() : '';
+
+    const body = $('preview-body');
+
+    // Parse as markdown first
+    body.innerHTML = renderMarkdown(data.text || '(no text available)');
+
+    // Apply highlighting if query exists
+    if (query && data.text) {
+      const words = [...new Set(
+        query.toLowerCase().split(/\s+/).filter(w => w.length >= 3)
+      )];
+
+      if (words.length > 0) {
+        // Escape special regex chars and add word boundaries for whole-word matching
+        const escaped = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const pattern = escaped.map(w => '\\b' + w + '\\b').join('|');
+        const regex = new RegExp(pattern, 'gi');
+
+        // Walk through all text nodes and highlight matches
+        const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, null, false);
+        const textNodes = [];
+        let node;
+        while (node = walker.nextNode()) {
+          textNodes.push(node);
+        }
+
+        textNodes.forEach(textNode => {
+          const text = textNode.nodeValue;
+          if (regex.test(text)) {
+            regex.lastIndex = 0; // Reset regex state for next test
+            const span = document.createElement('span');
+            const parts = text.split(new RegExp('(' + pattern + ')', 'gi'));
+            span.innerHTML = parts.map((part, i) =>
+              i % 2 === 1
+                ? '<mark>' + escHtml(part) + '</mark>'
+                : escHtml(part)
+            ).join('');
+            textNode.parentNode.replaceChild(span, textNode);
+          }
+        });
+
+        const firstMark = body.querySelector('mark');
+        if (firstMark) firstMark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    }
+
+  } catch (e) {
+    $('preview-body').innerHTML = '<div class="preview-loading">⚠ Could not load preview: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+$('btn-preview-close').addEventListener('click', () => {
+  $('preview-panel').classList.add('hidden');
+  _previewCurrentDocId = null;
+  _previewCurrentText  = null;
+});
+
+$('btn-preview-open-file').addEventListener('click', () => {
+  if (!_previewCurrentDocId) return;
+  openExternalUrl(`${FILE_SERVER}/docs/${encodeURIComponent(_previewCurrentDocId)}`);
+});
+
+$('btn-preview-copy-text').addEventListener('click', () => {
+  if (!_previewCurrentText) return;
+  navigator.clipboard.writeText(_previewCurrentText).then(() => {
+    const btn = $('btn-preview-copy-text');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = orig; }, 1800);
+  });
+});
+
+// Intercept docs_url clicks in tool output cards and message bubbles
+// Use all agent search queries for comprehensive highlighting
+document.addEventListener('click', e => {
+  const a = e.target.closest('.tool-json a') || e.target.closest('.msg-bubble a');
+  if (!a) return;
+  const href = a.getAttribute('href') || '';
+  const textMatch = href.match(/\/text\/([a-f0-9]+)/);
+  const docsMatch = href.match(/\/docs\/([a-f0-9]+)/);
+  const match = textMatch || docsMatch;
+  if (!match) return;
+  e.preventDefault();
+  const docId = match[1];
+  // Combine all agent search queries for highlighting, fall back to user's query if none available
+  const allQueries = state.allAgentSearchQueries.length > 0
+    ? state.allAgentSearchQueries.join(' ')
+    : state.queryHistory[0] || '';
+  openPreview(docId, allQueries);
 });
 
 /* =============================================================
@@ -484,7 +602,7 @@ function updateTokenDisplay(tq, tr) {
   }
   // Show cumulative session tokens (query + reply)
   const fmt = n => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
-  dom.tokenLabel.textContent = `Session: ${fmt(total)} tokens (${fmt(state.sessionTokens.query)}\u2191 ${fmt(state.sessionTokens.reply)}\u2193)`;
+  dom.tokenLabel.textContent = `Session: ${fmt(total)} tokens (${fmt(state.sessionTokens.query)}↑ ${fmt(state.sessionTokens.reply)}↓)`;
   drawSparkline();
   // Keep the hidden bar updated for the color coding logic
   const limit = getModelContextLimit(state.model);
@@ -507,6 +625,7 @@ async function sendQuery() {
   state.queryHistory.unshift(question);
   if (state.queryHistory.length > 50) state.queryHistory.pop();
   state.historyIndex = -1;
+  state.allAgentSearchQueries = [];  // Reset for new query submission
 
   dom.queryInput.value = '';
   autoResizeTextarea();
@@ -611,6 +730,13 @@ function handleSSEEvent(type, data) {
     case 'tool_start':
       addToolStartCard(data.tool, data.input, data.call_id);
       dom.agentMsg.textContent = `🔧 ${data.tool}`;
+      // Collect all agent search queries for highlighting (from search tools)
+      if (data.tool && data.tool.includes('search') && data.input) {
+        const searchQuery = data.input.query || data.input.search_query || data.input.text || '';
+        if (searchQuery && !state.allAgentSearchQueries.includes(searchQuery)) {
+          state.allAgentSearchQueries.push(searchQuery);
+        }
+      }
       break;
     case 'tool_end':
       updateToolEndCard(data.tool, data.output, data.duration_ms, data.call_id);
@@ -635,7 +761,7 @@ function handleSSEEvent(type, data) {
       const prevTotal = state.sessionTokens.query + state.sessionTokens.reply;
       const liveTotal = prevTotal + data.token_query + data.token_reply;
       const fmt = n => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
-      dom.tokenLabel.textContent = `Session: ${fmt(liveTotal)} tokens (${fmt(state.sessionTokens.query + data.token_query)}\u2191 ${fmt(state.sessionTokens.reply + data.token_reply)}\u2193)`;
+      dom.tokenLabel.textContent = `Session: ${fmt(liveTotal)} tokens (${fmt(state.sessionTokens.query + data.token_query)}↑ ${fmt(state.sessionTokens.reply + data.token_reply)}↓)`;
       const limit = getModelContextLimit(state.model);
       const pct   = limit > 0 ? Math.min((liveTotal / limit) * 100, 100) : Math.min((liveTotal / 100000) * 100, 100);
       dom.tokenBar.style.width = pct + '%';
@@ -955,35 +1081,154 @@ $('btn-ws-create').addEventListener('click', async () => {
 });
 
 /* =============================================================
-   SCHEDULER MODAL
+   SYNC MODAL  (Watch Mode / Polling Scheduler / Off)
    ============================================================= */
+function _updateSyncModeFields() {
+  const mode = $('sync-mode-select').value;
+  $('sched-interval-field').classList.toggle('hidden', mode !== 'scheduler');
+  $('sched-enrich-on-watch-field').classList.toggle('hidden', mode !== 'watch');
+}
+$('sync-mode-select').addEventListener('change', _updateSyncModeFields);
+
+/* ── Sidebar quick on/off toggle ── */
+async function _getCurrentSyncMode(workspace) {
+  let watchRunning = false, schedRunning = false;
+  try { const ws = await api('/watch/status'); watchRunning = !!ws.running && (ws.registered_workspaces || []).includes(workspace); } catch {}
+  try { const ss = await api('/scheduler/status'); schedRunning = !!ss.running; } catch {}
+  if (watchRunning) return 'watch';
+  if (schedRunning) return 'scheduler';
+  return 'off';
+}
+
+async function refreshSyncToggle() {
+  const toggle = $('toggle-sync-enabled');
+  const hint = $('sync-status-hint');
+  if (!state.workspace) { toggle.checked = false; hint.textContent = 'Auto-sync is off'; hint.classList.remove('on'); return; }
+  const mode = await _getCurrentSyncMode(state.workspace);
+  toggle.checked = mode !== 'off';
+  if (mode === 'watch') {
+    hint.textContent = 'Auto-sync is on (Watch Mode)';
+    hint.classList.add('on');
+  } else if (mode === 'scheduler') {
+    hint.textContent = 'Auto-sync is on (Scheduler)';
+    hint.classList.add('on');
+  } else {
+    hint.textContent = 'Auto-sync is off';
+    hint.classList.remove('on');
+  }
+}
+
+$('toggle-sync-enabled').addEventListener('change', async () => {
+  const toggle = $('toggle-sync-enabled');
+  const turningOn = toggle.checked;
+  if (!state.workspace) { toggle.checked = false; return; }
+  toggle.disabled = true;
+  try {
+    if (turningOn) {
+      // Default to Watch Mode unless the user previously configured polling
+      // via the Sync modal (persisted as enable_watch_mode in settings.json).
+      let useWatch = true;
+      try {
+        const wms = await api('/settings/watch-mode');
+        useWatch = wms.enable_watch_mode !== false;
+      } catch {}
+      if (useWatch) {
+        await api('/watch', { method: 'POST', body: JSON.stringify({ workspace: state.workspace }) });
+        await api('/scheduler', { method: 'DELETE' }).catch(() => {});
+      } else {
+        await api('/scheduler', { method: 'POST', body: JSON.stringify({ workspace: state.workspace, interval_minutes: 15 }) });
+        await api('/watch', { method: 'DELETE' }).catch(() => {});
+      }
+    } else {
+      await api('/watch', { method: 'DELETE' }).catch(() => {});
+      await api('/scheduler', { method: 'DELETE' }).catch(() => {});
+    }
+  } catch (e) {
+    alert('Sync toggle failed: ' + e.message);
+  } finally {
+    toggle.disabled = false;
+    await refreshSyncToggle();
+  }
+});
+
+// Refresh the sidebar toggle whenever the workspace changes
+dom.workspaceSelect.addEventListener('change', refreshSyncToggle);
+
 $('btn-scheduler').addEventListener('click', async () => {
   const sel = $('sched-workspace-select');
   sel.innerHTML = state.workspaces.map(w => `<option value="${escHtml(w.name)}">${escHtml(w.name)}</option>`).join('');
   if (state.workspace) sel.value = state.workspace;
-  // Show/hide Stop button based on whether scheduler is running
+
+  // Determine the actual current mode by checking what's running, not just
+  // the persisted preference — this is the source of truth for the dropdown.
+  let watchRunning = false, schedRunning = false;
+  try { const ws = await api('/watch/status'); watchRunning = !!ws.running && (ws.registered_workspaces || []).includes(sel.value); } catch {}
+  try { const ss = await api('/scheduler/status'); schedRunning = !!ss.running; } catch {}
+
+  let currentMode = 'off';
+  if (watchRunning) currentMode = 'watch';
+  else if (schedRunning) currentMode = 'scheduler';
+  $('sync-mode-select').value = currentMode;
+
+  // Load persisted enrich_on_watch preference regardless of mode (used if/when watch is selected)
   try {
-    const status = await api('/scheduler/status');
-    $('btn-sched-stop').style.display = status.running ? '' : 'none';
-  } catch { $('btn-sched-stop').style.display = 'none'; }
+    const wms = await api('/settings/watch-mode');
+    $('toggle-enrich-on-watch').checked = wms.enrich_on_watch !== false; // default true
+  } catch { $('toggle-enrich-on-watch').checked = true; }
+
+  _updateSyncModeFields();
   $('modal-scheduler').classList.remove('hidden');
 });
 $('btn-sched-cancel').addEventListener('click', () => $('modal-scheduler').classList.add('hidden'));
-$('btn-sched-stop').addEventListener('click', async () => {
-  if (!confirm('Stop the scheduler? All automatic syncs will be disabled.')) return;
-  try {
-    await api('/scheduler', { method: 'DELETE' });
-    $('modal-scheduler').classList.add('hidden');
-  } catch (e) { alert('Failed to stop scheduler: ' + e.message); }
-});
+
 $('btn-sched-save').addEventListener('click', async () => {
   const workspace = $('sched-workspace-select').value;
-  const interval  = parseInt($('sched-interval-input').value, 10);
-  if (!interval || interval < 1) { alert('Please enter a valid interval.'); return; }
+  const mode      = $('sync-mode-select').value;
+  const btn       = $('btn-sched-save');
+
+  if (mode === 'scheduler') {
+    const interval = parseInt($('sched-interval-input').value, 10);
+    if (!interval || interval < 1) { alert('Please enter a valid interval.'); return; }
+  }
+
+  btn.disabled = true; btn.textContent = 'Saving…';
   try {
-    await api('/scheduler', { method: 'POST', body: JSON.stringify({ workspace, interval_minutes: interval }) });
+    if (mode === 'watch') {
+      const enrichOnWatch = $('toggle-enrich-on-watch').checked;
+      await api('/settings/watch-mode', {
+        method: 'POST',
+        body: JSON.stringify({ enable_watch_mode: true, enrich_on_watch: enrichOnWatch }),
+      });
+      await api('/watch', { method: 'POST', body: JSON.stringify({ workspace }) });
+      // Mutually exclusive: make sure the polling scheduler isn't also running.
+      await api('/scheduler', { method: 'DELETE' }).catch(() => {});
+
+    } else if (mode === 'scheduler') {
+      const interval = parseInt($('sched-interval-input').value, 10);
+      await api('/settings/watch-mode', {
+        method: 'POST',
+        body: JSON.stringify({ enable_watch_mode: false, enrich_on_watch: $('toggle-enrich-on-watch').checked }),
+      });
+      await api('/scheduler', { method: 'POST', body: JSON.stringify({ workspace, interval_minutes: interval }) });
+      // Mutually exclusive: make sure watch mode isn't also running.
+      await api('/watch', { method: 'DELETE' }).catch(() => {});
+
+    } else {
+      // Off — stop both, leave only manual ingest available.
+      await api('/watch', { method: 'DELETE' }).catch(() => {});
+      await api('/scheduler', { method: 'DELETE' }).catch(() => {});
+      await api('/settings/watch-mode', {
+        method: 'POST',
+        body: JSON.stringify({ enable_watch_mode: false, enrich_on_watch: $('toggle-enrich-on-watch').checked }),
+      });
+    }
     $('modal-scheduler').classList.add('hidden');
-  } catch (e) { alert('Scheduler error: ' + e.message); }
+  } catch (e) {
+    alert('Sync error: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+  await refreshSyncToggle();
 });
 
 /* =============================================================
@@ -1031,7 +1276,7 @@ async function openSettings(tab) {
     const keys = data.keys || {};
     ['google', 'openai', 'anthropic'].forEach(provider => {
       if (keys[provider]) {
-        setKeyStatus(provider, '\u2713 Key saved: ' + keys[provider], 'ok');
+        setKeyStatus(provider, '✓ Key saved: ' + keys[provider], 'ok');
         $('key-btn-delete-' + provider).classList.remove('hidden');
       } else {
         $('key-btn-delete-' + provider).classList.add('hidden');
@@ -1042,7 +1287,7 @@ async function openSettings(tab) {
   try {
     const ls = await api('/langsmith');
     if (ls.configured) {
-      setKeyStatus('langsmith', '\u2713 Configured: ' + ls.api_key_masked + (ls.project ? ' / ' + ls.project : ''), 'ok');
+      setKeyStatus('langsmith', '✓ Configured: ' + ls.api_key_masked + (ls.project ? ' / ' + ls.project : ''), 'ok');
       $('btn-langsmith-delete').classList.remove('hidden');
       $('langsmith-project').value = ls.project || '';
     } else {
@@ -1050,7 +1295,7 @@ async function openSettings(tab) {
     }
   } catch (e) { console.warn('Could not load LangSmith config:', e); }
 
-  // --- Tab 2: Semantic ---
+  // --- Tab 2: Semantic + Re-ranking ---
   try {
     const s = await api('/settings/semantic');
     $('toggle-enable-semantic').checked        = !!s.enable_semantic;
@@ -1059,6 +1304,13 @@ async function openSettings(tab) {
     $('sem-provider-select').value = semProvider;
     _populateSemModelDropdown(semProvider, s.semantic_model || '');
   } catch (e) { console.warn('Could not load semantic settings:', e); }
+
+  try {
+    const r = await api('/settings/reranking');
+    $('toggle-enable-reranking').checked = r.enable_reranking !== false;
+    $('rerank-multiplier-input').value = r.rerank_candidate_multiplier ?? 4;
+    $('rerank-multiplier-field').classList.toggle('hidden', !$('toggle-enable-reranking').checked);
+  } catch (e) { console.warn('Could not load re-ranking settings:', e); }
 
   // --- Tab 3: Models ---
   await loadModels();
@@ -1092,10 +1344,10 @@ document.querySelectorAll('.key-btn-save').forEach(btn => {
       // Reload masked version to confirm
       const data = await api('/keys');
       const masked = (data.keys || {})[provider] || '';
-      setKeyStatus(provider, '\u2713 Saved: ' + masked, 'ok');
+      setKeyStatus(provider, '✓ Saved: ' + masked, 'ok');
       $('key-btn-delete-' + provider).classList.remove('hidden');
     } catch (e) {
-      setKeyStatus(provider, '\u2717 ' + (e.message || 'Failed'), 'err');
+      setKeyStatus(provider, '✗ ' + (e.message || 'Failed'), 'err');
     } finally {
       btn.disabled = false;
       btn.textContent = 'Save';
@@ -1115,7 +1367,7 @@ document.querySelectorAll('.key-btn-delete[data-provider]').forEach(btn => {
       btn.classList.add('hidden');
       $('key-input-' + provider).value = '';
     } catch (e) {
-      setKeyStatus(provider, '\u2717 ' + (e.message || 'Failed'), 'err');
+      setKeyStatus(provider, '✗ ' + (e.message || 'Failed'), 'err');
     }
   });
 });
@@ -1129,15 +1381,15 @@ $('btn-langsmith-save').addEventListener('click', async () => {
   const project = $('langsmith-project').value.trim() || 'local-search-agent';
   if (!apiKey) { setKeyStatus('langsmith', 'Please enter an API key.', 'err'); return; }
   const btn = $('btn-langsmith-save');
-  btn.disabled = true; btn.textContent = 'Saving\u2026';
+  btn.disabled = true; btn.textContent = 'Saving…';
   try {
     await api('/langsmith', { method: 'POST', body: JSON.stringify({ api_key: apiKey, project }) });
     $('langsmith-api-key').value = '';
     const ls = await api('/langsmith');
-    setKeyStatus('langsmith', '\u2713 Configured: ' + ls.api_key_masked + ' / ' + ls.project, 'ok');
+    setKeyStatus('langsmith', '✓ Configured: ' + ls.api_key_masked + ' / ' + ls.project, 'ok');
     $('btn-langsmith-delete').classList.remove('hidden');
   } catch (e) {
-    setKeyStatus('langsmith', '\u2717 ' + (e.message || 'Failed'), 'err');
+    setKeyStatus('langsmith', '✗ ' + (e.message || 'Failed'), 'err');
   } finally {
     btn.disabled = false; btn.textContent = 'Save';
   }
@@ -1153,7 +1405,7 @@ $('btn-langsmith-delete').addEventListener('click', async () => {
     $('langsmith-api-key').value = '';
     $('langsmith-project').value = '';
   } catch (e) {
-    setKeyStatus('langsmith', '\u2717 ' + (e.message || 'Failed'), 'err');
+    setKeyStatus('langsmith', '✗ ' + (e.message || 'Failed'), 'err');
   }
 });
 
@@ -1177,7 +1429,7 @@ function _populateSemModelDropdown(provider, currentModel) {
   if (!models.length && provider) {
     const opt = document.createElement('option');
     opt.disabled = true;
-    opt.textContent = 'No models \u2014 add via Model Manager';
+    opt.textContent = 'No models — add via Model Manager';
     sel.appendChild(opt);
   }
 }
@@ -1186,10 +1438,14 @@ $('sem-provider-select').addEventListener('change', () => {
   _populateSemModelDropdown($('sem-provider-select').value, '');
 });
 
-/* Semantic save */
+/* Semantic + Re-ranking save */
+$('toggle-enable-reranking').addEventListener('change', () => {
+  $('rerank-multiplier-field').classList.toggle('hidden', !$('toggle-enable-reranking').checked);
+});
+
 $('btn-semantic-save').addEventListener('click', async () => {
   const btn = $('btn-semantic-save');
-  btn.disabled = true; btn.textContent = 'Saving\u2026';
+  btn.disabled = true; btn.textContent = 'Saving…';
   try {
     await api('/settings/semantic', {
       method: 'POST',
@@ -1200,11 +1456,18 @@ $('btn-semantic-save').addEventListener('click', async () => {
         semantic_model:         $('sem-model-select').value,
       }),
     });
-    $('semantic-status').textContent = '\u2713 Saved';
+    await api('/settings/reranking', {
+      method: 'POST',
+      body: JSON.stringify({
+        enable_reranking:            $('toggle-enable-reranking').checked,
+        rerank_candidate_multiplier: parseInt($('rerank-multiplier-input').value, 10) || 4,
+      }),
+    });
+    $('semantic-status').textContent = '✓ Saved';
     $('semantic-status').className = 'key-status ok';
     setTimeout(() => { $('semantic-status').textContent = ''; $('semantic-status').className = 'key-status'; }, 2500);
   } catch (e) {
-    $('semantic-status').textContent = '\u2717 ' + (e.message || 'Failed');
+    $('semantic-status').textContent = '✗ ' + (e.message || 'Failed');
     $('semantic-status').className = 'key-status err';
   } finally {
     btn.disabled = false; btn.textContent = 'Save';
@@ -1255,7 +1518,7 @@ ADV_KEYS.forEach(key => {
 
 $('btn-advanced-save').addEventListener('click', async () => {
   const btn = $('btn-advanced-save');
-  btn.disabled = true; btn.textContent = 'Saving\u2026';
+  btn.disabled = true; btn.textContent = 'Saving…';
   const overrides = {};
   ADV_KEYS.forEach(key => {
     const input = $('adv-' + key);
@@ -1263,12 +1526,12 @@ $('btn-advanced-save').addEventListener('click', async () => {
   });
   try {
     await api('/settings/advanced', { method: 'POST', body: JSON.stringify({ overrides }) });
-    $('advanced-status').textContent = '\u2713 Saved \u2014 takes effect on next ingest';
+    $('advanced-status').textContent = '✓ Saved — takes effect on next ingest';
     $('advanced-status').className = 'key-status ok';
     setTimeout(() => { $('advanced-status').textContent = ''; $('advanced-status').className = 'key-status'; }, 3500);
     await loadAdvancedSettings();
   } catch (e) {
-    $('advanced-status').textContent = '\u2717 ' + (e.message || 'Failed');
+    $('advanced-status').textContent = '✗ ' + (e.message || 'Failed');
     $('advanced-status').className = 'key-status err';
   } finally {
     btn.disabled = false; btn.textContent = 'Save';
@@ -1279,12 +1542,12 @@ $('btn-advanced-reset').addEventListener('click', async () => {
   if (!confirm('Reset all Advanced settings to compiled-in defaults?')) return;
   try {
     await api('/settings/advanced', { method: 'DELETE' });
-    $('advanced-status').textContent = '\u2713 Reset to defaults';
+    $('advanced-status').textContent = '✓ Reset to defaults';
     $('advanced-status').className = 'key-status ok';
     setTimeout(() => { $('advanced-status').textContent = ''; $('advanced-status').className = 'key-status'; }, 2500);
     await loadAdvancedSettings();
   } catch (e) {
-    $('advanced-status').textContent = '\u2717 ' + (e.message || 'Failed');
+    $('advanced-status').textContent = '✗ ' + (e.message || 'Failed');
     $('advanced-status').className = 'key-status err';
   }
 });
@@ -1320,7 +1583,7 @@ function repopulateModelDropdown(provider) {
     `<option value="${escHtml(m)}"${m === current ? ' selected' : ''}>${escHtml(m)}</option>`
   ).join('');
   if (models.length === 0) {
-    sel.innerHTML = '<option value="" disabled selected>No models \u2014 add via Settings</option>';
+    sel.innerHTML = '<option value="" disabled selected>No models — add via Settings</option>';
   } else if (!models.includes(current)) {
     state.model = models[0];
     sel.value = models[0];
@@ -1384,7 +1647,7 @@ function renderModelList(models) {
         renderModelList(_allModels);
         repopulateModelDropdown(state.provider);
       } catch (e) {
-        $('model-mgr-status').textContent = '\u2717 ' + (e.message || 'Failed');
+        $('model-mgr-status').textContent = '✗ ' + (e.message || 'Failed');
         $('model-mgr-status').className = 'key-status err';
       }
     });
@@ -1404,11 +1667,11 @@ $('btn-model-add').addEventListener('click', async () => {
     $('model-mgr-name').value = '';
     renderModelList(_allModels);
     repopulateModelDropdown(state.provider);
-    $('model-mgr-status').textContent = '\u2713 Added';
+    $('model-mgr-status').textContent = '✓ Added';
     $('model-mgr-status').className = 'key-status ok';
     setTimeout(() => { $('model-mgr-status').textContent = ''; $('model-mgr-status').className = 'key-status'; }, 2000);
   } catch (e) {
-    $('model-mgr-status').textContent = '\u2717 ' + (e.message || 'Failed');
+    $('model-mgr-status').textContent = '✗ ' + (e.message || 'Failed');
     $('model-mgr-status').className = 'key-status err';
   }
 });
@@ -1426,30 +1689,31 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function boot() {
-  console.log('\ud83d\ude80 Booting Local Search Agent UI...');
+  console.log('🚀 Booting Local Search Agent UI...');
   await loadConfig();
-  console.log('\u2713 Config loaded');
+  console.log('✓ Config loaded');
   await loadModels();
-  console.log('\u2713 Models loaded');
+  console.log('✓ Models loaded');
   dom.providerSelect.value = state.provider;
   await loadWorkspaces();
-  console.log('\u2713 Workspaces loaded:', state.workspaces.length, 'workspaces');
+  console.log('✓ Workspaces loaded:', state.workspaces.length, 'workspaces');
   if (state.workspace) {
-    console.log('\ud83d\udcc2 Active workspace:', state.workspace);
+    console.log('📂 Active workspace:', state.workspace);
     await loadSessions();
     if (state.sessions.length > 0) {
       await loadSession(state.sessions[0].session_id);
     } else {
       await newChat();
     }
+    await refreshSyncToggle();
   } else {
-    console.warn('\u26a0\ufe0f  No workspace selected. Create one to start.');
+    console.warn('⚠️  No workspace selected. Create one to start.');
   }
   updateTokenDisplay();
-  console.log('\ud83d\udd0d Starting health checks...');
+  console.log('🔍 Starting health checks...');
   pollHealth();
   setInterval(pollHealth, 15000);
-  console.log('\u2705 Boot complete');
+  console.log('✅ Boot complete');
 }
 
 boot().catch(e => console.error('Boot error:', e));

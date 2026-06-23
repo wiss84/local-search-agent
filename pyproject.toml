@@ -57,7 +57,14 @@ dependencies = [
     "meilisearch-python-sdk>=7.1.5",
 
     # Background scheduler (pinned to 3.x — v4 is alpha with breaking changes)
+    # Deprecated in favor of Watch Mode (watchdog) — kept for backward compatibility.
     "apscheduler>=3.11.2,<4.0",
+
+    # Filesystem event watching for Watch Mode (replaces polling-based scheduler)
+    "watchdog>=5.0.0,<7.0.0",
+
+    # Cross-encoder re-ranking of search results
+    "flashrank>=0.2.10",
 
     # HTTP client
     "httpx>=0.28.1",

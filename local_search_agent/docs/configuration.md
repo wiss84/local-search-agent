@@ -110,6 +110,20 @@ The semantic provider is configured separately via `local-search config set-sema
 | `enable_access_control` | `False` | Enforce Windows/LDAP access control on file server endpoints. |
 | `ldap_server` | `None` | LDAP server URL, e.g. `ldap://company.local`. Required if `enable_access_control=True`. |
 
+### Watch Mode
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `enable_watch_mode` | `False` | Use filesystem events (`watchdog`) instead of polling to trigger re-ingestion. See [Watch Mode](#watch-mode-1) below. Mutually exclusive with the polling scheduler. |
+| `enrich_on_watch` | `True` | Whether watch-triggered re-ingests also run semantic enrichment (only relevant if `enable_semantic=True`). Set `False` to skip the LLM call on watch-triggered syncs for speed; you'll need a later manual or scheduled sync to backfill semantic fields for those files. |
+
+### Re-ranking
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `enable_reranking` | `True` | Re-rank Meilisearch BM25 results with a local cross-encoder (`flashrank`) for better relevance. Runs fully offline; the model downloads once (~17MB) on first use and is cached. |
+| `rerank_candidate_multiplier` | `4` | Fetch `top_k x` this many candidates from Meilisearch before re-ranking down to `top_k`. Higher values improve quality at the cost of slightly more compute. |
+
 ---
 
 ## Model Reference
@@ -334,3 +348,62 @@ config.validate()   # raises ValueError for bad config, warns for missing key
 ```
 
 The framework calls `validate()` internally at relevant points. A missing API key is only a warning at construction time — it becomes an error when a query is actually sent.
+
+---
+
+## Watch Mode
+
+Watch Mode reacts to filesystem changes (file created, modified, or deleted) within seconds, instead of waiting for the next polling interval. It is the recommended way to keep an index fresh and replaces the older polling-based `IncrementalSyncScheduler` for most use cases.
+
+### How it works
+
+A `watchdog` observer watches all of a workspace's `document_dirs`. When a change is detected, a short debounce window (~2.5s) collapses bursts of OS-level events — a single file save, or a folder copy with many files — into one re-ingestion run, rather than firing a sync per individual event.
+
+Each watch-triggered sync reuses the exact same delta logic and `IngestionPipeline` as a manual or scheduled sync. The only behavioural difference is *when* it fires, and whether semantic enrichment runs (`enrich_on_watch`).
+
+### Enabling Watch Mode
+
+**Python API:**
+
+```python
+config = SearchAgentConfig(
+    document_dirs=["/data/finance"],
+    workspace_name="finance",
+    provider="google",
+    enable_watch_mode=True,
+    enrich_on_watch=True,   # default; set False to skip LLM calls on watch-triggered syncs
+)
+framework = SearchAgentFramework(config)
+framework.start_watch_mode()
+```
+
+**CLI:**
+
+```bash
+local-search watch start --workspace finance --dirs "C:\Shares\FinanceDocs"
+local-search watch status
+local-search watch trigger --workspace finance   # force immediate sync, bypassing debounce
+```
+
+**UI:** Sidebar **Sync** button → select **Watch Mode** in the dropdown → **Save**. A quick on/off toggle sits next to the Sync button for turning automatic sync on or off without opening the modal.
+
+### Watch Mode vs. the polling Scheduler
+
+| | Watch Mode | Polling Scheduler *(deprecated)* |
+|---|---|---|
+| Trigger | Filesystem events (`watchdog`) | Fixed interval (default 15 min) |
+| Reaction time | Seconds | Up to the full interval |
+| Detects changes while app is closed | No — only reacts while running | No — only reacts while running |
+| Mechanism | `WorkspaceWatcher` | `IncrementalSyncScheduler` (APScheduler) |
+
+The two are mutually exclusive per workspace — enabling one via the UI Sync modal or sidebar toggle automatically stops the other for that workspace. The polling scheduler remains available for backward compatibility but is deprecated; new code should use Watch Mode.
+
+### `enrich_on_watch`
+
+If a workspace has `enable_semantic=True`, every new or changed document should ideally get the same concept/synonym enrichment as the rest of the index — otherwise query expansion only works for some documents. `enrich_on_watch` defaults to `True` for this reason. Set it to `False` only if you want watch-triggered syncs to skip the LLM call entirely (e.g. a slow/rate-limited free-tier provider with frequent file churn), accepting that those documents won't be enriched until a later manual or scheduled full sync.
+
+```python
+framework.set_watch_mode_settings(enable_watch_mode=True, enrich_on_watch=False)
+settings = framework.get_watch_mode_settings()
+# {'enable_watch_mode': True, 'enrich_on_watch': False}
+```

@@ -402,6 +402,67 @@ def settings_file_path() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Watch mode settings — stored in settings.json alongside semantic settings.
+# ---------------------------------------------------------------------------
+
+_WATCH_MODE_DEFAULTS: dict = {
+    "enable_watch_mode": False,
+    "enrich_on_watch": True,
+}
+
+
+def get_watch_mode_settings() -> dict:
+    """
+    Return watch-mode feature flags.
+
+    Returns
+    -------
+    dict with keys: enable_watch_mode, enrich_on_watch
+    """
+    s = _load_settings()
+    return {
+        "enable_watch_mode": bool(s.get("enable_watch_mode", False)),
+        "enrich_on_watch": bool(s.get("enrich_on_watch", True)),
+    }
+
+
+def set_all_watch_mode_settings(enable_watch_mode: bool, enrich_on_watch: bool) -> None:
+    """Set all watch-mode settings in one atomic write."""
+    s = _load_settings()
+    s["enable_watch_mode"] = bool(enable_watch_mode)
+    s["enrich_on_watch"] = bool(enrich_on_watch)
+    _save_settings(s)
+
+
+# ---------------------------------------------------------------------------
+# Re-ranking settings — stored in settings.json.
+# ---------------------------------------------------------------------------
+
+
+def get_reranking_settings() -> dict:
+    """
+    Return re-ranking feature flags.
+
+    Returns
+    -------
+    dict with keys: enable_reranking, rerank_candidate_multiplier
+    """
+    s = _load_settings()
+    return {
+        "enable_reranking": bool(s.get("enable_reranking", True)),
+        "rerank_candidate_multiplier": int(s.get("rerank_candidate_multiplier", 4)),
+    }
+
+
+def set_all_reranking_settings(enable_reranking: bool, rerank_candidate_multiplier: int) -> None:
+    """Set all re-ranking settings in one atomic write."""
+    s = _load_settings()
+    s["enable_reranking"] = bool(enable_reranking)
+    s["rerank_candidate_multiplier"] = int(rerank_candidate_multiplier)
+    _save_settings(s)
+
+
+# ---------------------------------------------------------------------------
 # Custom DB path — stored in settings.json so the UI remembers it across restarts
 # ---------------------------------------------------------------------------
 

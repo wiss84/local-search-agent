@@ -315,3 +315,101 @@ class TestHelpEndpoint:
         tc, *_ = client
         resp = tc.get("/help/getting-started.md")
         assert resp.status_code in (200, 404, 405)
+
+
+# ---------------------------------------------------------------------------
+# GET /preview/{doc_id}  — document preview panel backend
+# ---------------------------------------------------------------------------
+
+
+class TestPreviewEndpoint:
+    def test_returns_200_for_known_doc(self, client):
+        tc, wm, *_ = client
+        doc_id = _doc_id(wm, "report.txt")
+        assert tc.get(f"/preview/{doc_id}").status_code == 200
+
+    def test_unknown_doc_id_returns_404(self, client):
+        tc, *_ = client
+        assert tc.get("/preview/000000000000dead").status_code == 404
+
+    def test_response_contains_required_fields(self, client):
+        tc, wm, *_ = client
+        doc_id = _doc_id(wm, "report.txt")
+        data = tc.get(f"/preview/{doc_id}").json()
+        required = {
+            "doc_id",
+            "title",
+            "file_type",
+            "source_path",
+            "text",
+            "match_start",
+            "match_end",
+            "snippet",
+        }
+        assert required <= data.keys()
+
+    def test_full_text_returned_matches_document(self, client):
+        tc, wm, *_ = client
+        doc_id = _doc_id(wm, "report.txt")
+        data = tc.get(f"/preview/{doc_id}").json()
+        assert "AWS" in data["text"]
+        assert "$1.2M" in data["text"]
+
+    def test_no_query_returns_no_match_position(self, client):
+        tc, wm, *_ = client
+        doc_id = _doc_id(wm, "report.txt")
+        data = tc.get(f"/preview/{doc_id}").json()
+        assert data["match_start"] == -1
+        assert data["match_end"] == -1
+
+    def test_no_query_still_returns_a_snippet(self, client):
+        """Even without a query, the preview should show a leading snippet
+        rather than an empty string, so the panel never renders blank."""
+        tc, wm, *_ = client
+        doc_id = _doc_id(wm, "report.txt")
+        data = tc.get(f"/preview/{doc_id}").json()
+        assert data["snippet"] != ""
+
+    def test_query_matching_word_sets_match_position(self, client):
+        tc, wm, *_ = client
+        doc_id = _doc_id(wm, "report.txt")
+        data = tc.get(f"/preview/{doc_id}", params={"query": "AWS spend"}).json()
+        assert data["match_start"] != -1
+        assert data["match_end"] > data["match_start"]
+        # The endpoint tries query words left-to-right and stops at the first
+        # hit, so "aws" (first word) wins over "spend" here.
+        matched_text = data["text"][data["match_start"] : data["match_end"]]
+        assert matched_text.lower() == "aws"
+
+    def test_query_with_no_matching_words_falls_back_to_no_match(self, client):
+        tc, wm, *_ = client
+        doc_id = _doc_id(wm, "report.txt")
+        data = tc.get(f"/preview/{doc_id}", params={"query": "zzqqxx nonexistent"}).json()
+        assert data["match_start"] == -1
+        assert data["match_end"] == -1
+
+    def test_query_short_words_are_skipped(self, client):
+        """Words under 3 chars (e.g. 'a', 'is', 'on') are skipped as stop words
+        so the match doesn't latch onto a trivial common word."""
+        tc, wm, *_ = client
+        doc_id = _doc_id(wm, "report.txt")
+        # "on" appears in "spend on Project Alpha" but is < 3 chars so should be skipped
+        data = tc.get(f"/preview/{doc_id}", params={"query": "on Alpha"}).json()
+        assert data["match_start"] != -1
+        matched_text = data["text"][data["match_start"] : data["match_end"]]
+        assert matched_text.lower() == "alpha"
+
+    def test_md_file_preview_works(self, client):
+        tc, wm, _, md_file = client
+        doc_id = _doc_id(wm, "handbook.md")
+        data = tc.get(f"/preview/{doc_id}", params={"query": "handbook"}).json()
+        assert data["file_type"] == "md"
+        assert "Handbook" in data["text"]
+
+    def test_custom_context_chars_respected(self, client):
+        tc, wm, *_ = client
+        doc_id = _doc_id(wm, "report.txt")
+        data = tc.get(f"/preview/{doc_id}", params={"context_chars": 10}).json()
+        # Snippet (no query, so it's a leading excerpt) should respect the smaller window:
+        # text[:10].strip() plus at most one trailing ellipsis character.
+        assert len(data["snippet"]) <= 11

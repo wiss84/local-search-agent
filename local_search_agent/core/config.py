@@ -71,6 +71,23 @@ class SearchAgentConfig:
     enable_query_expansion : Expand queries with synonyms before searching (C).
     semantic_model         : Override LLM model for concept compilation.
 
+    Watch mode
+    --------------------------------
+    enable_watch_mode    : Use filesystem events (watchdog) instead of polling to
+                           trigger re-ingestion. Deprecated alternative: the polling
+                           IncrementalSyncScheduler (start_incremental_scheduler).
+    enrich_on_watch       : Whether watch-triggered re-ingests also run semantic
+                           enrichment (only relevant if enable_semantic is True).
+                           Defaults to True so watch-triggered docs stay consistent
+                           with the rest of the workspace.
+
+    Re-ranking
+    --------------------------------
+    enable_reranking             : Re-rank Meilisearch BM25 results with a local
+                                   cross-encoder (flashrank) for better relevance.
+    rerank_candidate_multiplier  : Fetch top_k * this many candidates from Meilisearch
+                                   before re-ranking down to top_k.
+
     Access control
     --------------------------------
     enable_access_control  : Enforce Windows/LDAP access control on file endpoints.
@@ -113,6 +130,14 @@ class SearchAgentConfig:
     enable_access_control: bool = False
     ldap_server: Optional[str] = None
 
+    # --- Watch mode (replaces polling-based incremental scheduler) ---
+    enable_watch_mode: bool = False
+    enrich_on_watch: bool = True
+
+    # --- Re-ranking ---
+    enable_reranking: bool = True
+    rerank_candidate_multiplier: int = 4
+
     # ------------------------------------------------------------------
     # Post-init
     # ------------------------------------------------------------------
@@ -139,6 +164,21 @@ class SearchAgentConfig:
                 self.semantic_model = s["semantic_model"]
             # Note: semantic_provider is stored in settings but never overwrites
             # the main config.provider — it is only used by _get_enricher directly
+        # Load watch-mode settings from settings.json if left at defaults
+        if not self.enable_watch_mode and self.enrich_on_watch:
+            from local_search_agent.core.key_manager import get_watch_mode_settings
+
+            w = get_watch_mode_settings()
+            self.enable_watch_mode = w["enable_watch_mode"]
+            self.enrich_on_watch = w["enrich_on_watch"]
+
+        # Load re-ranking settings from settings.json if left at defaults
+        if self.enable_reranking and self.rerank_candidate_multiplier == 4:
+            from local_search_agent.core.key_manager import get_reranking_settings
+
+            r = get_reranking_settings()
+            self.enable_reranking = r["enable_reranking"]
+            self.rerank_candidate_multiplier = r["rerank_candidate_multiplier"]
 
     # ------------------------------------------------------------------
     # Accessors

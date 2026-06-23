@@ -173,7 +173,9 @@ class TestMeilisearchClient:
         client = self._make_client(mock_client)
         client._index = mock_index
 
-        results = client.search("AWS spend")
+        # Re-ranking is unrelated to this test and would otherwise trigger a
+        # real flashrank model load; disable it explicitly.
+        results = client.search("AWS spend", enable_reranking=False)
 
         assert len(results) == 1
         assert results[0]["doc_id"] == "abc123"
@@ -210,7 +212,7 @@ class TestMeilisearchClient:
         client = self._make_client(mock_client)
         client._index = mock_index
 
-        results = client.search("AWS")
+        results = client.search("AWS", enable_reranking=False)
         assert "<em>" not in results[0]["snippet"]
         assert "AWS" in results[0]["snippet"]
 
@@ -236,3 +238,98 @@ class TestMeilisearchClient:
         stats = client.get_index_stats()
         assert stats["number_of_documents"] == 42
         assert stats["is_indexing"] is False
+
+
+# ---------------------------------------------------------------------------
+# MeilisearchClient re-ranking integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestMeilisearchClientReranking:
+    """
+    Tests for the re-ranking integration in MeilisearchClient.search().
+    The Reranker itself is mocked here — see test_reranker.py for
+    Reranker-specific unit tests (including a real flashrank smoke test).
+    """
+
+    def _make_client_with_hits(self, hits: list[dict]):
+        from local_search_agent.search.meilisearch_client import MeilisearchClient
+
+        client = MeilisearchClient(
+            url="http://localhost:7700", api_key="test_key", index_name="test_index"
+        )
+        mock_client = MagicMock()
+        mock_index = MagicMock()
+        mock_results = MagicMock()
+        mock_results.hits = hits
+        mock_index.search.return_value = mock_results
+        client._client = mock_client
+        client._index = mock_index
+        return client, mock_index
+
+    def _hit(self, doc_id, text="some content"):
+        return {
+            "doc_id": doc_id,
+            "title": f"Doc {doc_id}",
+            "file_type": "txt",
+            "workspace": "ws",
+            "source_path": f"/{doc_id}.txt",
+            "modified_at": "2025-01-01T00:00:00+00:00",
+            "concepts": [],
+            "_formatted": {"text": text},
+        }
+
+    def test_reranking_disabled_uses_meili_limit_directly(self):
+        client, mock_index = self._make_client_with_hits([self._hit("a")])
+        client.search("query", top_k=5, enable_reranking=False)
+        _, kwargs = mock_index.search.call_args
+        assert kwargs["limit"] == 5
+
+    def test_reranking_enabled_widens_meili_limit(self):
+        client, mock_index = self._make_client_with_hits([self._hit("a")])
+        client.search("query", top_k=5, enable_reranking=True, rerank_candidate_multiplier=4)
+        _, kwargs = mock_index.search.call_args
+        assert kwargs["limit"] == 20  # 5 * 4
+
+    def test_reranking_limit_capped_at_1000(self):
+        client, mock_index = self._make_client_with_hits([self._hit("a")])
+        client.search("query", top_k=500, enable_reranking=True, rerank_candidate_multiplier=10)
+        _, kwargs = mock_index.search.call_args
+        assert kwargs["limit"] == 1000
+
+    def test_reranker_called_with_candidates_and_top_k(self):
+        hits = [self._hit("a"), self._hit("b"), self._hit("c")]
+        client, mock_index = self._make_client_with_hits(hits)
+
+        mock_reranker = MagicMock()
+        mock_reranker.rerank.return_value = hits[:2]
+        client._reranker = mock_reranker
+
+        results = client.search("query", top_k=2, enable_reranking=True)
+
+        mock_reranker.rerank.assert_called_once()
+        call_kwargs = mock_reranker.rerank.call_args.kwargs
+        assert call_kwargs["query"] == "query"
+        assert len(call_kwargs["candidates"]) == 3
+        assert call_kwargs["top_k"] == 2
+        assert len(results) == 2
+
+    def test_reranker_not_called_when_disabled(self):
+        hits = [self._hit("a")]
+        client, mock_index = self._make_client_with_hits(hits)
+
+        mock_reranker = MagicMock()
+        client._reranker = mock_reranker
+
+        client.search("query", enable_reranking=False)
+        mock_reranker.rerank.assert_not_called()
+
+    def test_reranker_not_called_on_empty_hits(self):
+        client, mock_index = self._make_client_with_hits([])
+
+        mock_reranker = MagicMock()
+        client._reranker = mock_reranker
+
+        results = client.search("query", enable_reranking=True)
+        mock_reranker.rerank.assert_not_called()
+        assert results == []

@@ -216,9 +216,34 @@ The pipeline walks all configured `document_dirs` recursively. Rules:
 
 ---
 
-## Incremental Scheduler
+## Watch Mode (recommended)
 
-The scheduler runs ingestion automatically in the background on a fixed interval. Only changed files are re-indexed (delta logic applies).
+Watch Mode reacts to filesystem events (`watchdog`) instead of polling on a fixed interval, so a changed file gets re-indexed within seconds rather than waiting for the next scheduled tick.
+
+```bash
+local-search watch start --workspace finance --dirs "C:\my_docs"
+local-search watch status
+local-search watch trigger --workspace finance
+```
+
+```python
+framework.start_watch_mode()
+framework.trigger_sync_now("finance")   # bypasses the debounce window
+framework.stop_watch_mode()
+```
+
+Watch mode behaviour:
+- One `watchdog` observer watches all of a workspace's `document_dirs` recursively
+- A short debounce window (~2.5s) collapses bursts of filesystem events — a single save, or a folder copy with many files — into a single re-ingestion run
+- Reuses the exact same delta logic and `IngestionPipeline` as a manual sync
+- Whether semantic enrichment runs on a watch-triggered sync is controlled by `enrich_on_watch` (default `True`) — see [Configuration Guide](configuration.md#watch-mode) for details
+- Sync state is written to SQLite before and after every run, same as the polling scheduler, so `local-search health` and sync history work identically regardless of which mechanism triggered the sync
+
+See the [Configuration Guide](configuration.md#watch-mode) for the full Watch Mode vs. Scheduler comparison.
+
+## Incremental Scheduler *(deprecated — use Watch Mode)*
+
+The original polling-based scheduler runs ingestion automatically in the background on a fixed interval. Only changed files are re-indexed (delta logic applies). It is kept for backward compatibility; new code should prefer [Watch Mode](#watch-mode-recommended) above, which reacts to changes immediately instead of waiting for the next tick.
 
 ```bash
 # Start the file server with scheduler enabled
@@ -240,6 +265,8 @@ Scheduler behaviour:
 - `coalesce=True` — if the scheduler misses a tick (machine asleep, etc.), it runs once on wake, not multiple times
 - `max_instances=1` — a sync job will not start if one is already running for the same workspace
 - Sync state is written to SQLite before and after every run
+
+Constructing `IncrementalSyncScheduler` directly now emits a `DeprecationWarning` pointing at `WorkspaceWatcher` / `framework.start_watch_mode()`.
 
 ---
 

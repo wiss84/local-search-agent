@@ -17,6 +17,7 @@ from local_search_agent import (
     IndexHealthSummary,
     WorkspaceManager,
     MetadataDB,
+    Reranker,
     # Agent tool integration
     LocalSearchTool,
     ToolResult,
@@ -202,6 +203,8 @@ Remove a workspace registration. Pass `wipe_index=True` to also delete the Meili
 
 ### Scheduler
 
+⚠️ **DEPRECATED** — Use watch mode instead. `start_incremental_scheduler()` is kept for backward compatibility but should not be used for new code. Watch mode is event-driven and reacts instantly to file changes without polling delays.
+
 ```python
 framework.start_incremental_scheduler(interval_minutes=15)
 ```
@@ -221,6 +224,70 @@ Add a specific workspace to a running scheduler.
 framework.trigger_sync_now(workspace_name=None)
 ```
 Force an immediate sync outside the normal schedule.
+
+### Watch Mode
+
+Filesystem event-driven re-ingestion. Reacts to file changes instantly without polling delays. **Recommended over the polling scheduler.**
+
+```python
+framework.start_watch_mode()
+```
+Start watch mode in a background thread. All workspaces registered with `enable_watch_mode=True` in the config (or via `set_watch_mode_settings()`) are watched for file changes. File events are debounced by 2 seconds — rapid bursts of changes are collapsed into a single sync. Semantic enrichment is controlled by `enrich_on_watch` in the config or by calling `set_watch_mode_settings()`.
+
+```python
+framework.stop_watch_mode()
+```
+Gracefully stop watch mode.
+
+```python
+framework.add_workspace_to_watch_mode(workspace_name)
+```
+Add a specific workspace to watch mode. The workspace must already be registered. Uses the `enrich_on_watch` setting from `set_watch_mode_settings()` or the config.
+
+```python
+status = framework.get_watch_mode_status() -> dict
+```
+Return watch mode state. Example:
+
+```python
+{
+    "running": True,
+    "watched_directories": {
+        "finance": 2,      # 2 directories being watched
+        "legal": 1,        # 1 directory
+    }
+}
+```
+
+```python
+framework.set_watch_mode_settings(enable_watch_mode: bool, enrich_on_watch: bool)
+```
+Configure watch mode behavior at runtime. Persists to the config so settings survive restarts.
+
+- `enable_watch_mode`: Enable/disable watch mode globally
+- `enrich_on_watch`: Whether watch-triggered syncs also run semantic enrichment (if enabled in the config). Set `False` to skip the LLM call for speed; you can always run a later full re-ingest with `force=True` to backfill semantic fields.
+
+```python
+settings = framework.get_watch_mode_settings() -> dict
+```
+Return current watch mode settings: `{"enable_watch_mode": bool, "enrich_on_watch": bool}`.
+
+**Example:**
+
+```python
+# Start watching all registered workspaces
+framework.set_watch_mode_settings(enable_watch_mode=True, enrich_on_watch=True)
+framework.start_watch_mode()
+
+# Later, add a new workspace to watch mode
+framework.add_workspace_to_watch_mode("hr")
+
+# Check status
+print(framework.get_watch_mode_status())  # {'running': True, 'watched_directories': {'finance': 1, 'hr': 1}}
+
+# Stop watching
+framework.stop_watch_mode()
+```
 
 ### Health Monitoring
 
@@ -363,6 +430,10 @@ config = SearchAgentConfig(
 | `semantic_model` | `str \| None` | `None` | Override model for concept extraction only. Defaults to `model_name`. The semantic provider is set separately via CLI/UI. |
 | `enable_access_control` | `bool` | `False` | *(Experimental)* Enforce Windows/LDAP access control |
 | `ldap_server` | `str \| None` | `None` | *(Experimental)* LDAP server URL |
+| `enable_watch_mode` | `bool` | `False` | Use filesystem events instead of polling to trigger re-ingestion |
+| `enrich_on_watch` | `bool` | `True` | Whether watch-triggered re-ingests also run semantic enrichment (if `enable_semantic=True`) |
+| `enable_reranking` | `bool` | `True` | Re-rank Meilisearch BM25 results with a local cross-encoder (flashrank) for better relevance. Fully offline. |
+| `rerank_candidate_multiplier` | `int` | `4` | Fetch `top_k × this many` candidates from Meilisearch before re-ranking down to `top_k`. Higher = better quality, more compute. |
 
 ### Methods
 
@@ -488,6 +559,80 @@ filter_expr = QueryBuilder(
 | `modified_after` | ISO date string — only docs modified after this date |
 | `modified_before` | ISO date string — only docs modified before this date |
 | `raw` | Raw Meilisearch filter string (overrides all others) |
+
+---
+
+## Reranker
+
+Cross-encoder re-ranking layer for improving BM25 relevance. Uses the local `flashrank` model (CPU-only) to re-score Meilisearch candidates on semantic similarity to the query.
+
+```python
+from local_search_agent import Reranker
+
+reranker = Reranker()
+```
+
+### Why Re-ranking?
+
+BM25 scores documents by term frequency — it has no semantic understanding. A cross-encoder re-ranker catches:
+- Synonym / paraphrase mismatches (query: "fail", doc: "exception")
+- BM25 over-ranking short chunks that happen to contain rare query terms
+- Improved relevance ordering for the same `top_k` results
+
+### Model & Caching
+
+- **Default model**: `ms-marco-TinyBERT-L-2-v2` (~17MB, ~100ms per 10 queries on CPU)
+- **First use**: Downloads to `<user_config_dir>/local-search-agent/models/flashrank/`
+- **Subsequent uses**: Loads from disk only — no internet access needed
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model_name` | `str` | `ms-marco-TinyBERT-L-2-v2` | flashrank model name |
+| `cache_dir` | `str \| None` | `<user_config_dir>/models/flashrank` | Model cache directory |
+| `max_length` | `int` | `512` | Max token length per passage. Model's native limit. Shorter values = faster. |
+
+### Methods
+
+```python
+scores = reranker.rerank(query: str, candidates: list[str], top_k: int = 5) -> list[tuple[str, float]]
+```
+
+Re-rank candidates against the query. Returns up to `top_k` results as `(candidate_text, score)` tuples, sorted by score (highest first). Scores are in range [0, 1].
+
+**Example:**
+
+```python
+candidates = [
+    "The system failed with error code 500.",
+    "Database connection exception occurred.",
+    "User login was successful.",
+]
+
+ranked = reranker.rerank("What error happened?", candidates, top_k=2)
+# [(The system failed..., 0.92), (Database connection..., 0.87)]
+```
+
+### Integration with SearchAgentFramework
+
+Reranking is built into the framework. Control via config:
+
+```python
+config = SearchAgentConfig(
+    document_dirs=["/data/docs"],
+    workspace_name="finance",
+    enable_reranking=True,              # Enable re-ranking (default)
+    rerank_candidate_multiplier=4,      # Fetch 4x top_k candidates, re-rank to top_k
+)
+
+framework = SearchAgentFramework(config)
+```
+
+The flow:
+1. `MeilisearchClient.search()` fetches `top_k × rerank_candidate_multiplier` candidates from Meilisearch
+2. `Reranker.rerank()` scores all candidates
+3. Results are truncated to `top_k` and returned to the agent
 
 ---
 

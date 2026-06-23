@@ -109,6 +109,72 @@ def build_app(
             raise HTTPException(404, detail=f"Document {doc_id!r} not found.")
         return PlainTextResponse(content=node.text, media_type="text/plain; charset=utf-8")
 
+    @app.get("/preview/{doc_id}", tags=["documents"])
+    async def get_preview(
+        doc_id: str,
+        query: str = "",
+        context_chars: int = 400,
+    ) -> JSONResponse:
+        """
+        Return document text with the position of the best-matching span
+        for the given query, so the frontend can render a highlighted preview.
+
+        Response shape
+        --------------
+        {
+            "doc_id":     "...",
+            "title":      "...",
+            "file_type":  "...",
+            "text":       "full cleaned markdown text",
+            "match_start": N,   # char offset of match start (-1 if no match)
+            "match_end":   M,   # char offset of match end   (-1 if no match)
+            "snippet":     "... short context window around the match ..."
+        }
+        """
+        node = workspace_manager.get_document(doc_id)
+        if node is None:
+            raise HTTPException(404, detail=f"Document {doc_id!r} not found.")
+
+        match_start = -1
+        match_end = -1
+        snippet = ""
+
+        if query.strip():
+            lower_text = node.text.lower()
+            # Find the earliest word in the query that matches
+            for word in query.lower().split():
+                if len(word) < 3:  # skip very short stop words
+                    continue
+                idx = lower_text.find(word)
+                if idx != -1:
+                    match_start = idx
+                    match_end = idx + len(word)
+                    # Build context snippet around the match
+                    start = max(0, idx - context_chars // 2)
+                    end = min(len(node.text), idx + context_chars // 2)
+                    prefix = "\u2026" if start > 0 else ""
+                    suffix = "\u2026" if end < len(node.text) else ""
+                    snippet = prefix + node.text[start:end].strip() + suffix
+                    break
+
+        if not snippet and node.text:
+            snippet = node.text[:context_chars].strip()
+            if len(node.text) > context_chars:
+                snippet += "\u2026"
+
+        return JSONResponse(
+            {
+                "doc_id": node.doc_id,
+                "title": node.title,
+                "file_type": node.file_type,
+                "source_path": node.source_path,
+                "text": node.text,
+                "match_start": match_start,
+                "match_end": match_end,
+                "snippet": snippet,
+            }
+        )
+
     @app.get("/docs/{doc_id}", tags=["documents"])
     async def get_raw_doc(doc_id: str) -> FileResponse:
         node = workspace_manager.get_document(doc_id)

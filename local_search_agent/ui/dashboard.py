@@ -73,7 +73,8 @@ class AppState:
         self.framework.start_file_server(port=config.file_server_port)
         self.framework._ensure_meilisearch()
 
-        self.scheduler: Optional[object] = None  # set by start_scheduler()
+        self.scheduler: Optional[object] = None  # set by start_scheduler() [deprecated]
+        self.watcher: Optional[object] = None  # set by start_watch_mode()
 
         self._agent = None
         self._agent_workspace: Optional[str] = None
@@ -140,6 +141,7 @@ class AppState:
     # ------------------------------------------------------------------
 
     def start_scheduler(self, interval_minutes: int = 15) -> None:
+        """DEPRECATED (polling-based, use start_watch_mode): start the APScheduler-backed scheduler."""
         from local_search_agent.scheduler.incremental_sync import IncrementalSyncScheduler
 
         self.scheduler = IncrementalSyncScheduler(
@@ -149,6 +151,21 @@ class AppState:
         )
         self.scheduler.start()
         logger.info("Scheduler started (interval=%dm)", interval_minutes)
+
+    # ------------------------------------------------------------------
+    # Watch mode
+    # ------------------------------------------------------------------
+
+    def start_watch_mode(self) -> None:
+        """Start the watchdog-backed WorkspaceWatcher (filesystem-event-driven sync)."""
+        from local_search_agent.scheduler.watch_mode import WorkspaceWatcher
+
+        self.watcher = WorkspaceWatcher(
+            workspace_manager=self.workspace_manager,
+            metadata_db=self._metadata_db,
+        )
+        self.watcher.start()
+        logger.info("Watch mode started.")
 
 
 # ---------------------------------------------------------------------------

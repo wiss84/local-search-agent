@@ -57,7 +57,7 @@ def build_search_tool(meili_client, config):
     def search_local_index(
         query: str,
         file_type: Optional[str] = None,
-        top_k: int = 8,
+        top_k: int = 3,
         date_filter: Optional[str] = None,
     ) -> str:
         """
@@ -70,7 +70,7 @@ def build_search_tool(meili_client, config):
         Args:
             query: Short keyword query (3-6 words). Focus on key terms, not full sentences.
             file_type: Optional filter. One of: "pdf", "docx", "html", "xlsx", "txt", "md".
-            top_k: Number of results to return (default 8, max 20).
+            top_k: Number of results to return (default 3, max 20).
             date_filter: Optional recency filter. One of: "1d" (last 24h), "3d" (last 3 days),
                 "7d" (last 7 days), "1m" (last month), "6m" (last 6 months),
                 "1y" (last year), "all" (no filter, default).
@@ -107,6 +107,8 @@ def build_search_tool(meili_client, config):
                 query=effective_query,
                 top_k=top_k,
                 filter_expr=filter_expr,
+                enable_reranking=config.enable_reranking,
+                rerank_candidate_multiplier=config.rerank_candidate_multiplier,
             )
         except Exception as e:
             logger.error("search_local_index failed: %s", e)

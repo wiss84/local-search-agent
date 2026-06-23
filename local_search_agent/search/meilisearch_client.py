@@ -70,6 +70,7 @@ class MeilisearchClient:
         self._index_name = index_name
         self._client = None  # Lazy init
         self._index = None  # Lazy init
+        self._reranker = None  # Lazy init
 
     # ------------------------------------------------------------------
     # Lazy initialisation
@@ -87,6 +88,14 @@ class MeilisearchClient:
                 ) from e
             self._client = Client(url=self._url, api_key=self._api_key)
         return self._client
+
+    def _get_reranker(self):
+        """Lazily create the Reranker (loads flashrank model on first use)."""
+        if self._reranker is None:
+            from local_search_agent.search.reranker import Reranker
+
+            self._reranker = Reranker()
+        return self._reranker
 
     def _get_index(self):
         """
@@ -242,32 +251,50 @@ class MeilisearchClient:
         top_k: int = DEFAULT_TOP_K,
         filter_expr: Optional[str] = None,
         snippet_chars: int = SNIPPET_CONTEXT_CHARS,
+        enable_reranking: bool = True,
+        rerank_candidate_multiplier: int = 4,
     ) -> list[dict]:
         """
         Search the index and return top-k results with snippets.
 
+        If enable_reranking is True, fetches a wider candidate pool from
+        Meilisearch (top_k * rerank_candidate_multiplier) and re-ranks with
+        a local cross-encoder (flashrank) before truncating to top_k.
+        Falls back to BM25 order if re-ranking fails.
+
         Parameters
         ----------
-        query        : User query string.
-        top_k        : Maximum number of results to return.
-        filter_expr  : Optional Meilisearch filter expression string,
-                       e.g. 'file_type = "pdf" AND workspace = "finance"'.
-                       Built by QueryBuilder.
-        snippet_chars: Approximate length of the context snippet (chars).
+        query                      : User query string.
+        top_k                      : Maximum number of results to return.
+        filter_expr                : Optional Meilisearch filter expression string,
+                                     e.g. 'file_type = "pdf" AND workspace = "finance"'.
+                                     Built by QueryBuilder.
+        snippet_chars              : Approximate length of the context snippet (chars).
+        enable_reranking           : Whether to apply cross-encoder re-ranking
+                                     (default True). Set False to skip for speed.
+        rerank_candidate_multiplier: How many more candidates to fetch from
+                                     Meilisearch before re-ranking (default 4).
+                                     e.g. top_k=5, multiplier=4 → fetch 20,
+                                     re-rank, return 5.
 
         Returns
         -------
         List of dicts, each containing:
             doc_id, title, file_type, workspace, source_path,
-            snippet (short context text), score (not available in Meilisearch CE,
-            will be 0.0), modified_at
+            snippet (short context text), score (BM25 score is not exposed
+            in Meilisearch CE; will be 0.0 or rerank_score if re-ranked),
+            modified_at
         """
         index = self._get_index()
+
+        # When re-ranking, fetch a wider candidate pool from Meilisearch so
+        # the cross-encoder has more candidates to promote from.
+        meili_limit = min(top_k * rerank_candidate_multiplier, 1000) if enable_reranking else top_k
 
         try:
             results = index.search(
                 query,
-                limit=top_k,
+                limit=meili_limit,
                 attributes_to_crop=["text"],
                 crop_length=snippet_chars // 5,
                 attributes_to_retrieve=[
@@ -312,6 +339,14 @@ class MeilisearchClient:
                     "snippet": snippet,
                     "score": 0.0,
                 }
+            )
+
+        # Apply cross-encoder re-ranking if enabled
+        if enable_reranking and hits:
+            hits = self._get_reranker().rerank(
+                query=query,
+                candidates=hits,
+                top_k=top_k,
             )
 
         return hits

@@ -164,6 +164,15 @@ class SchedulerSetRequest(BaseModel):
     interval_minutes: int
 
 
+class WatchSetRequest(BaseModel):
+    workspace: str
+
+
+class WatchModeSettingsRequest(BaseModel):
+    enable_watch_mode: bool
+    enrich_on_watch: bool
+
+
 class ModelAddRequest(BaseModel):
     provider: str
     model_name: str
@@ -179,6 +188,11 @@ class SemanticSettingsRequest(BaseModel):
     enable_query_expansion: bool
     semantic_provider: str = ""
     semantic_model: str = ""
+
+
+class RerankSettingsRequest(BaseModel):
+    enable_reranking: bool
+    rerank_candidate_multiplier: int = 4
 
 
 class LangSmithRequest(BaseModel):
@@ -467,6 +481,38 @@ def build_ui_router(app_state) -> APIRouter:
             }
         )
 
+    @router.get("/settings/reranking")
+    async def get_reranking_settings() -> JSONResponse:
+        """Return current re-ranking feature flags from config."""
+        return JSONResponse(
+            {
+                "enable_reranking": app_state.config.enable_reranking,
+                "rerank_candidate_multiplier": app_state.config.rerank_candidate_multiplier,
+            }
+        )
+
+    @router.post("/settings/reranking")
+    async def set_reranking_settings(body: RerankSettingsRequest) -> JSONResponse:
+        """
+        Update re-ranking settings at runtime and persist to settings.json.
+        Takes effect immediately for all subsequent searches.
+        """
+        from local_search_agent.core.key_manager import set_all_reranking_settings
+
+        app_state.config.enable_reranking = body.enable_reranking
+        app_state.config.rerank_candidate_multiplier = body.rerank_candidate_multiplier
+        set_all_reranking_settings(
+            enable_reranking=body.enable_reranking,
+            rerank_candidate_multiplier=body.rerank_candidate_multiplier,
+        )
+        return JSONResponse(
+            {
+                "ok": True,
+                "enable_reranking": body.enable_reranking,
+                "rerank_candidate_multiplier": body.rerank_candidate_multiplier,
+            }
+        )
+
     # ----------------------------------------------------------------
     # Advanced (ingestion tuning) settings
     # ----------------------------------------------------------------
@@ -631,6 +677,135 @@ def build_ui_router(app_state) -> APIRouter:
         if app_state.scheduler is None:
             return JSONResponse({"running": False, "jobs": []})
         return JSONResponse(app_state.scheduler.get_status())
+
+    # ----------------------------------------------------------------
+    # Watch mode (filesystem-event-driven, replaces the polling scheduler)
+    # ----------------------------------------------------------------
+
+    @router.post("/watch")
+    async def add_workspace_to_watch(body: WatchSetRequest) -> JSONResponse:
+        """
+        Add a workspace to watch mode. Auto-starts the watcher on first use.
+        """
+        if app_state.watcher is None:
+            app_state.start_watch_mode()
+        try:
+            ws = app_state.workspace_manager.get_workspace(body.workspace)
+            if ws is None:
+                raise HTTPException(404, detail=f"Workspace {body.workspace!r} not found.")
+            from local_search_agent.core.config import SearchAgentConfig
+            from local_search_agent.core.key_manager import get_watch_mode_settings
+
+            watch_settings = get_watch_mode_settings()
+            ws_config = SearchAgentConfig(
+                workspace_name=body.workspace,
+                document_dirs=_normalise_dirs(ws),
+                meilisearch_url=app_state.config.meilisearch_url,
+                meili_master_key=app_state.config.meili_master_key,
+                provider=app_state.config.provider,
+                db_path=app_state.config.db_path,
+                enrich_on_watch=watch_settings["enrich_on_watch"],
+            )
+
+            # Reuse the same progress-callback shape as the scheduler so the
+            # status bar shows watch-triggered syncs just like manual ingests.
+            def _make_callback(ws_name):
+                def _cb(indexed, skipped, failed, total, current_file):
+                    import os as _os
+                    import time as _time
+
+                    with _ingest_lock:
+                        prog = _ingest_registry.get(ws_name)
+                        if prog is None or prog.status not in ("running",):
+                            prog = _IngestProgress(
+                                workspace=ws_name,
+                                status="running",
+                                started_at=_time.monotonic(),
+                            )
+                            _ingest_registry[ws_name] = prog
+                        prog.files_total = total
+                        prog.files_processed = indexed + skipped + failed
+                        prog.files_skipped = skipped
+                        prog.files_failed = failed
+                        prog.current_file = (
+                            _os.path.basename(current_file)
+                            if current_file not in ("", "__done__")
+                            else ""
+                        )
+                        if current_file == "__done__":
+                            prog.status = "done"
+                            prog.finished_at = _time.monotonic()
+
+                return _cb
+
+            app_state.watcher.add_workspace(
+                ws_config,
+                progress_callback=_make_callback(body.workspace),
+            )
+            return JSONResponse({"ok": True, "workspace": body.workspace})
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, detail=str(e))
+
+    @router.delete("/watch")
+    async def stop_watch_mode() -> JSONResponse:
+        if app_state.watcher is None or not app_state.watcher.is_running:
+            return JSONResponse({"ok": True, "message": "Watch mode was not running."})
+        app_state.watcher.stop(wait=False)
+        app_state.watcher = None
+        return JSONResponse({"ok": True, "message": "Watch mode stopped."})
+
+    @router.get("/watch/status")
+    async def watch_status() -> JSONResponse:
+        if app_state.watcher is None:
+            return JSONResponse(
+                {"running": False, "registered_workspaces": [], "watched_directories": {}}
+            )
+        return JSONResponse(app_state.watcher.get_status())
+
+    @router.post("/watch/trigger/{workspace_name}")
+    async def trigger_watch_sync(workspace_name: str) -> JSONResponse:
+        """Force an immediate sync for a workspace registered with watch mode."""
+        if app_state.watcher is None:
+            raise HTTPException(400, detail="Watch mode is not running.")
+        try:
+            app_state.watcher.trigger_now(workspace_name)
+            return JSONResponse({"ok": True, "workspace": workspace_name})
+        except ValueError as e:
+            raise HTTPException(404, detail=str(e))
+
+    @router.get("/settings/watch-mode")
+    async def get_watch_mode_settings_route() -> JSONResponse:
+        """Return current watch-mode feature flags from settings.json."""
+        from local_search_agent.core.key_manager import get_watch_mode_settings
+
+        return JSONResponse(get_watch_mode_settings())
+
+    @router.post("/settings/watch-mode")
+    async def set_watch_mode_settings_route(body: WatchModeSettingsRequest) -> JSONResponse:
+        """
+        Update watch-mode feature flags (enable_watch_mode, enrich_on_watch).
+        Persists to settings.json. Does not itself start/stop the watcher —
+        use POST/DELETE /api/ui/watch for that.
+        """
+        from local_search_agent.core.key_manager import set_all_watch_mode_settings
+
+        app_state.config.enable_watch_mode = body.enable_watch_mode
+        app_state.config.enrich_on_watch = body.enrich_on_watch
+
+        set_all_watch_mode_settings(
+            enable_watch_mode=body.enable_watch_mode,
+            enrich_on_watch=body.enrich_on_watch,
+        )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "enable_watch_mode": body.enable_watch_mode,
+                "enrich_on_watch": body.enrich_on_watch,
+            }
+        )
 
     @router.get("/db-info")
     async def db_info() -> JSONResponse:

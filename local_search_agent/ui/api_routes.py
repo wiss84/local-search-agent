@@ -463,6 +463,7 @@ def build_ui_router(app_state) -> APIRouter:
         app_state.config.enable_semantic = body.enable_semantic
         app_state.config.enable_query_expansion = body.enable_query_expansion
         app_state.config.semantic_model = body.semantic_model or None
+        app_state._agent = None
 
         set_all_semantic_settings(
             enable_semantic=body.enable_semantic,
@@ -501,6 +502,7 @@ def build_ui_router(app_state) -> APIRouter:
 
         app_state.config.enable_reranking = body.enable_reranking
         app_state.config.rerank_candidate_multiplier = body.rerank_candidate_multiplier
+        app_state._agent = None
         set_all_reranking_settings(
             enable_reranking=body.enable_reranking,
             rerank_candidate_multiplier=body.rerank_candidate_multiplier,
@@ -534,25 +536,42 @@ def build_ui_router(app_state) -> APIRouter:
 
     @router.post("/settings/advanced")
     async def set_advanced_settings(body: AdvancedSettingsRequest) -> JSONResponse:
-        """Persist advanced setting overrides. Pass an empty dict to reset all to defaults."""
+        """
+        Persist advanced setting overrides. Pass an empty dict to reset all to defaults.
+
+        DEFAULT_TOP_K and DEFAULT_MAX_ITERATIONS are also applied live to the
+        running app_state.config (mirroring /settings/reranking) so no UI/agent
+        restart is needed — the next query picks up the new value immediately.
+        All other advanced settings (chunking, PDF/DOCX batching, snippet length)
+        are already re-read from advanced_settings.json on every ingest/search
+        call and never required a restart.
+        """
         from local_search_agent.core.key_manager import (
             get_effective_constants,
             set_advanced_settings,
         )
 
         set_advanced_settings(body.overrides)
-        return JSONResponse({"ok": True, "effective": get_effective_constants()})
+        effective = get_effective_constants()
+        app_state.config.top_k = effective["DEFAULT_TOP_K"]
+        app_state.config.max_iterations = effective["DEFAULT_MAX_ITERATIONS"]
+        app_state._agent = None
+        return JSONResponse({"ok": True, "effective": effective})
 
     @router.delete("/settings/advanced")
     async def reset_advanced_settings() -> JSONResponse:
-        """Reset all advanced settings to compiled-in defaults."""
+        """Reset all advanced settings to compiled-in defaults. Applies live, no restart."""
         from local_search_agent.core.key_manager import (
             get_effective_constants,
             set_advanced_settings,
         )
 
         set_advanced_settings({})
-        return JSONResponse({"ok": True, "effective": get_effective_constants()})
+        effective = get_effective_constants()
+        app_state.config.top_k = effective["DEFAULT_TOP_K"]
+        app_state.config.max_iterations = effective["DEFAULT_MAX_ITERATIONS"]
+        app_state._agent = None
+        return JSONResponse({"ok": True, "effective": effective})
 
     # ----------------------------------------------------------------
     # Ingestion

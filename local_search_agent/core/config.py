@@ -11,13 +11,25 @@ from typing import Optional
 
 from local_search_agent.core.constants import (
     DEFAULT_HOST,
-    DEFAULT_MAX_ITERATIONS,
     DEFAULT_MAX_RETRIES,
     DEFAULT_MEILI_MASTER_KEY,
     DEFAULT_MEILI_URL,
     DEFAULT_PORT,
-    DEFAULT_TOP_K,
 )
+
+
+def _default_top_k() -> int:
+    """Resolve the default top_k, respecting any advanced_settings.json override."""
+    from local_search_agent.core.key_manager import get_effective_constants
+
+    return get_effective_constants()["DEFAULT_TOP_K"]
+
+
+def _default_max_iterations() -> int:
+    """Resolve the default max_iterations, respecting any advanced_settings.json override."""
+    from local_search_agent.core.key_manager import get_effective_constants
+
+    return get_effective_constants()["DEFAULT_MAX_ITERATIONS"]
 
 
 def _default_db_path() -> str:
@@ -114,8 +126,8 @@ class SearchAgentConfig:
     file_server_port: int = 8000  # Separate, fixed port for the text/docs file server
 
     # --- Agent behaviour ---
-    top_k: int = DEFAULT_TOP_K
-    max_iterations: int = DEFAULT_MAX_ITERATIONS
+    top_k: int = field(default_factory=_default_top_k)
+    max_iterations: int = field(default_factory=_default_max_iterations)
     max_retries: int = DEFAULT_MAX_RETRIES
 
     # --- Persistence ---

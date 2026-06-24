@@ -40,12 +40,8 @@ import shutil
 import tempfile
 from typing import Optional
 
-from local_search_agent.core.constants import (
-    PDF_PAGES_PER_BATCH,
-    PDF_SPLIT_THRESHOLD,
-    TESSERACT_FALLBACK_MIN_CHARS,
-)
 from local_search_agent.core.document_node import DocumentNode
+from local_search_agent.core.key_manager import get_effective_constants
 from local_search_agent.ingestion.cleaner import clean
 from local_search_agent.ingestion.parser import BaseParser, ParserError
 
@@ -330,14 +326,14 @@ def _extract_native_text_pymupdf(path: str) -> str:
     return ""
 
 
-def _is_empty_result(text: str) -> bool:
+def _is_empty_result(text: str, min_chars: int) -> bool:
     """
     Return True if extracted text is effectively empty.
 
     Used both for the native text check (decide if OCR is needed at all)
     and for the Tesseract output check (decide if ONNX fallback is needed).
     """
-    return len(text.strip()) < TESSERACT_FALLBACK_MIN_CHARS
+    return len(text.strip()) < min_chars
 
 
 # --------------------------------------------------------------------------- #
@@ -345,7 +341,9 @@ def _is_empty_result(text: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def _convert_batch_with_fallback(tmp_path: str, start: int, end: int) -> tuple[str, str]:
+def _convert_batch_with_fallback(
+    tmp_path: str, start: int, end: int, tesseract_fallback_min_chars: int
+) -> tuple[str, str]:
     """
     Convert a single page-range batch using the tiered OCR strategy.
 
@@ -362,7 +360,7 @@ def _convert_batch_with_fallback(tmp_path: str, start: int, end: int) -> tuple[s
     """
     # --- Step 1: Native text extraction (instant, no OCR) ---
     native_text = _extract_native_text_pymupdf(tmp_path)
-    if not _is_empty_result(native_text):
+    if not _is_empty_result(native_text, tesseract_fallback_min_chars):
         logger.debug("Pages %d-%d: native text sufficient, skipping OCR.", start + 1, end)
         try:
             converter = _get_no_ocr_converter()
@@ -378,7 +376,7 @@ def _convert_batch_with_fallback(tmp_path: str, start: int, end: int) -> tuple[s
             logger.info("Pages %d-%d: scanned batch — trying Tesseract.", start + 1, end)
             result = tess_converter.convert(tmp_path)
             tess_text = result.document.export_to_markdown()
-            if not _is_empty_result(tess_text):
+            if not _is_empty_result(tess_text, tesseract_fallback_min_chars):
                 return tess_text, "tesseract"
             logger.debug(
                 "Pages %d-%d: Tesseract returned minimal text — falling back to ONNX.",
@@ -411,7 +409,8 @@ def _convert_batch_with_fallback(tmp_path: str, start: int, end: int) -> tuple[s
 
 def _convert_pdf_in_batches(
     convertee_path: str,
-    pages_per_batch: int = PDF_PAGES_PER_BATCH,
+    pages_per_batch: int,
+    tesseract_fallback_min_chars: int,
 ) -> str:
     """
     Split a large PDF into page-range batches, convert each with the tiered
@@ -452,7 +451,9 @@ def _convert_pdf_in_batches(
             continue
 
         try:
-            batch_md, engine = _convert_batch_with_fallback(tmp_path, start, end)
+            batch_md, engine = _convert_batch_with_fallback(
+                tmp_path, start, end, tesseract_fallback_min_chars
+            )
             accumulated.append(batch_md)
             if engine == "tesseract":
                 tesseract_fallback_count += 1
@@ -528,11 +529,18 @@ class PDFParser(BaseParser):
         logger.info("Parsing PDF: %s", source_path)
 
         try:
+            eff = get_effective_constants()
+            pdf_split_threshold = eff["PDF_SPLIT_THRESHOLD"]
+            pdf_pages_per_batch = eff["PDF_PAGES_PER_BATCH"]
+            tesseract_fallback_min_chars = eff["TESSERACT_FALLBACK_MIN_CHARS"]
+
             total_pages = _count_pdf_pages(source_path)
 
-            if total_pages is not None and total_pages >= PDF_SPLIT_THRESHOLD:
+            if total_pages is not None and total_pages >= pdf_split_threshold:
                 raw_markdown = _convert_pdf_in_batches(
-                    source_path, pages_per_batch=PDF_PAGES_PER_BATCH
+                    source_path,
+                    pages_per_batch=pdf_pages_per_batch,
+                    tesseract_fallback_min_chars=tesseract_fallback_min_chars,
                 )
             else:
                 # Small PDF: single pass with native-first tiered strategy
@@ -542,7 +550,7 @@ class PDFParser(BaseParser):
                 try:
                     shutil.copy2(source_path, tmp.name)
                     raw_markdown, engine = _convert_batch_with_fallback(
-                        tmp.name, 0, total_pages or 0
+                        tmp.name, 0, total_pages or 0, tesseract_fallback_min_chars
                     )
                     logger.debug(
                         "Small PDF %r converted [%s].",

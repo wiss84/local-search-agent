@@ -170,6 +170,7 @@ class QueryExpander:
                 query=query,
                 top_k=top_k,
                 filter_expr=filter_expr,
+                enable_reranking=False,
             )
         except Exception as e:
             logger.warning("Index-based expansion search failed: %s", e)

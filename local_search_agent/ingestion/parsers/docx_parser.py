@@ -23,10 +23,8 @@ import os
 import tempfile
 from typing import Optional
 
-from local_search_agent.core.constants import (
-    DOCX_CHAR_SPLIT_THRESHOLD,
-)
 from local_search_agent.core.document_node import DocumentNode
+from local_search_agent.core.key_manager import get_effective_constants
 from local_search_agent.ingestion.cleaner import clean
 from local_search_agent.ingestion.parser import BaseParser, ParserError
 
@@ -145,6 +143,7 @@ def _split_docx_in_batches(
     docx_bytes: bytes,
     *,
     source_path: str,
+    char_split_threshold: int,
 ) -> str:
     """
     Split a large DOCX into paragraph-count batches and convert each with
@@ -178,13 +177,13 @@ def _split_docx_in_batches(
     # expected chars by the threshold, then ceiling to batches count.
     est_total_chars = _estimate_docx_output_chars(source_path) or 0
 
-    if est_total_chars <= DOCX_CHAR_SPLIT_THRESHOLD:
+    if est_total_chars <= char_split_threshold:
         # Under threshold — single call
         converter = DocumentConverter()
         result = converter.convert(source_path)
         return result.document.export_to_markdown()
 
-    num_batches = max(2, (est_total_chars // DOCX_CHAR_SPLIT_THRESHOLD) + 1)
+    num_batches = max(2, (est_total_chars // char_split_threshold) + 1)
     paras_per_batch = max(1, total_paras // num_batches)
     logger.info(
         "Large DOCX (%d paras, ~%d est. chars) — splitting to %d batches (~%d paras each)",
@@ -320,8 +319,9 @@ class DOCXParser(BaseParser):
             import docx  # noqa: F401 — checks python-docx availability
 
             estimated_chars = _estimate_docx_output_chars(source_path)
+            docx_char_split_threshold = get_effective_constants()["DOCX_CHAR_SPLIT_THRESHOLD"]
             use_batching = bool(
-                estimated_chars is not None and estimated_chars > DOCX_CHAR_SPLIT_THRESHOLD
+                estimated_chars is not None and estimated_chars > docx_char_split_threshold
             )
         except ImportError as e:
             raise ParserError(
@@ -342,6 +342,7 @@ class DOCXParser(BaseParser):
                 raw_markdown = _split_docx_in_batches(
                     file_bytes,
                     source_path=source_path,
+                    char_split_threshold=docx_char_split_threshold,
                 )
             else:
                 result = converter.convert(source_path)

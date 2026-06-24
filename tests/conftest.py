@@ -147,6 +147,26 @@ def registered_node(wm, workspace, sample_node) -> DocumentNode:
 
 
 # ---------------------------------------------------------------------------
+# Settings isolation fixture
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def isolated_settings(tmp_path, monkeypatch):
+    """
+    Automatically mock settings and advanced_settings paths for all tests.
+    This ensures tests use isolated, ephemeral settings instead of loading
+    from the actual user config directory.
+    """
+    from local_search_agent.core import key_manager
+
+    # Mock settings path (used by semantic, watch-mode, and reranking settings)
+    monkeypatch.setattr(key_manager, "_settings_path", lambda: tmp_path / "settings.json")
+    # Mock advanced settings path (used by get_effective_constants)
+    monkeypatch.setattr(key_manager, "_advanced_path", lambda: tmp_path / "advanced_settings.json")
+
+
+# ---------------------------------------------------------------------------
 # Mock fixtures
 # ---------------------------------------------------------------------------
 

@@ -30,13 +30,12 @@ except ImportError:
 from local_search_agent.core.constants import (
     DEFAULT_MEILI_MASTER_KEY,
     DEFAULT_MEILI_URL,
-    DEFAULT_TOP_K,
     FIELD_DOC_ID,
     FILTERABLE_ATTRIBUTES,
     SEARCHABLE_ATTRIBUTES,
-    SNIPPET_CONTEXT_CHARS,
 )
 from local_search_agent.core.document_node import DocumentNode
+from local_search_agent.core.key_manager import get_effective_constants
 
 logger = logging.getLogger(__name__)
 
@@ -248,9 +247,9 @@ class MeilisearchClient:
     def search(
         self,
         query: str,
-        top_k: int = DEFAULT_TOP_K,
+        top_k: Optional[int] = None,
         filter_expr: Optional[str] = None,
-        snippet_chars: int = SNIPPET_CONTEXT_CHARS,
+        snippet_chars: Optional[int] = None,
         enable_reranking: bool = True,
         rerank_candidate_multiplier: int = 4,
     ) -> list[dict]:
@@ -266,10 +265,16 @@ class MeilisearchClient:
         ----------
         query                      : User query string.
         top_k                      : Maximum number of results to return.
+                                     Defaults to the effective DEFAULT_TOP_K
+                                     (respecting any advanced_settings.json override)
+                                     when not explicitly passed.
         filter_expr                : Optional Meilisearch filter expression string,
                                      e.g. 'file_type = "pdf" AND workspace = "finance"'.
                                      Built by QueryBuilder.
         snippet_chars              : Approximate length of the context snippet (chars).
+                                     Defaults to the effective SNIPPET_CONTEXT_CHARS
+                                     (respecting any advanced_settings.json override)
+                                     when not explicitly passed.
         enable_reranking           : Whether to apply cross-encoder re-ranking
                                      (default True). Set False to skip for speed.
         rerank_candidate_multiplier: How many more candidates to fetch from
@@ -285,6 +290,13 @@ class MeilisearchClient:
             in Meilisearch CE; will be 0.0 or rerank_score if re-ranked),
             modified_at
         """
+        if top_k is None or snippet_chars is None:
+            eff = get_effective_constants()
+            if top_k is None:
+                top_k = eff["DEFAULT_TOP_K"]
+            if snippet_chars is None:
+                snippet_chars = eff["SNIPPET_CONTEXT_CHARS"]
+
         index = self._get_index()
 
         # When re-ranking, fetch a wider candidate pool from Meilisearch so

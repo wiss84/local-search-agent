@@ -57,7 +57,7 @@ def build_search_tool(meili_client, config):
     def search_local_index(
         query: str,
         file_type: Optional[str] = None,
-        top_k: int = 3,
+        top_k: Optional[int] = None,
         date_filter: Optional[str] = None,
     ) -> str:
         """
@@ -70,12 +70,14 @@ def build_search_tool(meili_client, config):
         Args:
             query: Short keyword query (3-6 words). Focus on key terms, not full sentences.
             file_type: Optional filter. One of: "pdf", "docx", "html", "xlsx", "txt", "md".
-            top_k: Number of results to return (default 3, max 20).
+            top_k: Number of results to return (defaults to the configured top_k, max 20).
             date_filter: Optional recency filter. One of: "1d" (last 24h), "3d" (last 3 days),
                 "7d" (last 7 days), "1m" (last month), "6m" (last 6 months),
                 "1y" (last year), "all" (no filter, default).
                 Use when the user asks for recent documents or mentions a time period.
         """
+        if top_k is None:
+            top_k = config.top_k
         top_k = min(max(1, top_k), 20)
 
         # Phase 5 Option C: query expansion

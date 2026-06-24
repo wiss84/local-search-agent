@@ -42,14 +42,9 @@ import logging
 import re
 from typing import Optional
 
-from local_search_agent.core.constants import (
-    CHUNK_MAX_CHARS,
-    CHUNK_MIN_CHARS,
-    CHUNK_OVERLAP_CHARS,
-    CHUNK_TARGET_CHARS,
-    TABLE_ROWS_PER_CHUNK,
-)
+from local_search_agent.core import constants as _C
 from local_search_agent.core.document_node import DocumentNode
+from local_search_agent.core.key_manager import get_effective_constants
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +100,12 @@ def chunk_document(node: DocumentNode) -> list[DocumentNode]:
         )
         return [node]
 
-    if len(text) < CHUNK_MIN_CHARS:
+    eff = get_effective_constants()
+    chunk_min_chars = eff["CHUNK_MIN_CHARS"]
+    rows_per_chunk = eff["TABLE_ROWS_PER_CHUNK"]
+    overlap_chars = eff["CHUNK_OVERLAP_CHARS"]
+
+    if len(text) < chunk_min_chars:
         logger.debug(
             "Skipping chunking for short document %r (%d chars)",
             node.title,
@@ -114,8 +114,8 @@ def chunk_document(node: DocumentNode) -> list[DocumentNode]:
         return [node]
 
     # --- Memory-safe retry loop ---
-    target = CHUNK_TARGET_CHARS
-    max_c = CHUNK_MAX_CHARS
+    target = eff["CHUNK_TARGET_CHARS"]
+    max_c = eff["CHUNK_MAX_CHARS"]
     max_attempts = 4  # original + 3 halving attempts
 
     for attempt in range(max_attempts):
@@ -123,11 +123,13 @@ def chunk_document(node: DocumentNode) -> list[DocumentNode]:
             if _detect_document_type(text) == "table":
                 if attempt == 0:
                     logger.debug("Using pure-table (row-based) chunking for %r", node.title)
-                raw_chunks = _chunk_table(text)
+                raw_chunks = _chunk_table(text, rows_per_chunk=rows_per_chunk)
             else:
                 if attempt == 0:
                     logger.debug("Using mixed-content chunking for %r", node.title)
-                raw_chunks = _chunk_mixed_content(text, target_chars=target, max_chars=max_c)
+                raw_chunks = _chunk_mixed_content(
+                    text, target_chars=target, max_chars=max_c, overlap_chars=overlap_chars
+                )
 
             raw_chunks = [c.strip() for c in raw_chunks if c.strip()]
 
@@ -192,9 +194,9 @@ def _detect_document_type(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _chunk_table(text: str) -> list[str]:
+def _chunk_table(text: str, rows_per_chunk: int = _C.TABLE_ROWS_PER_CHUNK) -> list[str]:
     """
-    Split a Markdown table into chunks of TABLE_ROWS_PER_CHUNK data rows.
+    Split a Markdown table into chunks of rows_per_chunk data rows.
     Header/separator rows are prepended to every chunk.
     Prose before/after the table is attached to the first/last chunk.
     """
@@ -244,13 +246,13 @@ def _chunk_table(text: str) -> list[str]:
     post_block = "\n".join(post_table).strip()
 
     chunks: list[str] = []
-    for i in range(0, max(len(data_rows), 1), TABLE_ROWS_PER_CHUNK):
-        row_slice = data_rows[i : i + TABLE_ROWS_PER_CHUNK]
+    for i in range(0, max(len(data_rows), 1), rows_per_chunk):
+        row_slice = data_rows[i : i + rows_per_chunk]
         chunk = f"{header_block}\n" + "\n".join(row_slice)
         chunk = chunk.strip()
         if i == 0 and pre_block:
             chunk = f"{pre_block}\n\n{chunk}"
-        if (i + TABLE_ROWS_PER_CHUNK) >= len(data_rows) and post_block:
+        if (i + rows_per_chunk) >= len(data_rows) and post_block:
             chunk = f"{chunk}\n\n{post_block}"
         chunks.append(chunk)
 
@@ -277,15 +279,16 @@ def _is_table_block(block: str) -> bool:
     return (table_lines / len(lines)) >= _BLOCK_TABLE_THRESHOLD
 
 
-def _get_overlap(text: str) -> str:
-    """Return the last CHUNK_OVERLAP_CHARS characters of text for use as an overlap prefix."""
-    return text[-CHUNK_OVERLAP_CHARS:] if len(text) > CHUNK_OVERLAP_CHARS else text
+def _get_overlap(text: str, overlap_chars: int = _C.CHUNK_OVERLAP_CHARS) -> str:
+    """Return the last overlap_chars characters of text for use as an overlap prefix."""
+    return text[-overlap_chars:] if len(text) > overlap_chars else text
 
 
 def _chunk_mixed_content(
     text: str,
-    target_chars: int = CHUNK_TARGET_CHARS,
-    max_chars: int = CHUNK_MAX_CHARS,
+    target_chars: int = _C.CHUNK_TARGET_CHARS,
+    max_chars: int = _C.CHUNK_MAX_CHARS,
+    overlap_chars: int = _C.CHUNK_OVERLAP_CHARS,
 ) -> list[str]:
     """
     Chunk mixed content (prose + tables) by protecting table boundaries.
@@ -319,7 +322,9 @@ def _chunk_mixed_content(
             result.append(full)
         # Tables are self-contained units — do not bleed table content into the
         # next chunk's overlap prefix.  Overlap is only meaningful for prose.
-        overlap_prefix = "" if is_table_flush else (_get_overlap(content) if content else "")
+        overlap_prefix = (
+            "" if is_table_flush else (_get_overlap(content, overlap_chars) if content else "")
+        )
         current_parts = []
         current_len = 0
 
@@ -342,12 +347,17 @@ def _chunk_mixed_content(
 
             if len(block) > max_chars:
                 # Single prose block larger than max_chars — use sliding-window split
-                sub_chunks = _chunk_sliding(block, target_chars=target_chars, max_chars=max_chars)
+                sub_chunks = _chunk_sliding(
+                    block,
+                    target_chars=target_chars,
+                    max_chars=max_chars,
+                    overlap_chars=overlap_chars,
+                )
                 for i, sc in enumerate(sub_chunks):
                     if i < len(sub_chunks) - 1:
                         full = (overlap_prefix + "\n\n" + sc).strip() if overlap_prefix else sc
                         result.append(full)
-                        overlap_prefix = _get_overlap(sc)
+                        overlap_prefix = _get_overlap(sc, overlap_chars)
                     else:
                         # Last sub-chunk: carry it forward for accumulation.
                         # Reset overlap_prefix — the sub-chunk already embeds overlap
@@ -416,17 +426,20 @@ def _find_break_points(text: str) -> list[tuple[int, int]]:
 
 
 def _chunk_sliding(
-    text: str, target_chars: int = CHUNK_TARGET_CHARS, max_chars: int = CHUNK_MAX_CHARS
+    text: str,
+    target_chars: int = _C.CHUNK_TARGET_CHARS,
+    max_chars: int = _C.CHUNK_MAX_CHARS,
+    overlap_chars: int = _C.CHUNK_OVERLAP_CHARS,
 ) -> list[str]:
     """
     Accumulate text into chunks using a sliding window with overlap.
 
     Algorithm:
-      - Once the accumulated chunk reaches CHUNK_TARGET_CHARS, scan forward
+      - Once the accumulated chunk reaches target_chars, scan forward
         for the highest-priority break point within the next
-        (CHUNK_MAX_CHARS - CHUNK_TARGET_CHARS) characters and cut there.
-      - If no break point exists before CHUNK_MAX_CHARS, force-cut there.
-      - Prepend the last CHUNK_OVERLAP_CHARS of the previous chunk's raw text
+        (max_chars - target_chars) characters and cut there.
+      - If no break point exists before max_chars, force-cut there.
+      - Prepend the last overlap_chars characters of the previous chunk's raw text
         to the next chunk so boundary content is findable from either side.
     """
     bp_map: dict[int, int] = dict(_find_break_points(text))
@@ -479,9 +492,7 @@ def _chunk_sliding(
             chunks.append(chunk_full)
 
         # Overlap: last N chars of the raw (non-prefixed) section
-        overlap_prefix = (
-            chunk_raw[-CHUNK_OVERLAP_CHARS:] if len(chunk_raw) > CHUNK_OVERLAP_CHARS else chunk_raw
-        )
+        overlap_prefix = chunk_raw[-overlap_chars:] if len(chunk_raw) > overlap_chars else chunk_raw
         start = best_pos
 
     return chunks if chunks else [text]

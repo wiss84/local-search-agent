@@ -110,31 +110,22 @@ class AppState:
 
     def _config_for_workspace(self, workspace: str):
         """Return a SearchAgentConfig scoped to a specific workspace."""
+        from dataclasses import asdict
+
         from local_search_agent.core.config import SearchAgentConfig
 
         ws = self.workspace_manager.get_workspace(workspace)
         document_dirs = []
         if ws:
-            # DB stores document_dir (singular); handle both shapes defensively.
             document_dirs = ws.get("document_dirs") or [ws.get("document_dir", "")]
-            document_dirs = [d for d in document_dirs if d]  # drop empty strings
+            document_dirs = [d for d in document_dirs if d]
 
-        return SearchAgentConfig(
-            workspace_name=workspace,
-            document_dirs=document_dirs,
-            meilisearch_url=self.config.meilisearch_url,
-            meili_master_key=self.config.meili_master_key,
-            provider=self.config.provider,
-            api_key=self.config.api_key,
-            model_name=self.config.model_name,
-            host=self.config.host,
-            port=self.config.port,
-            file_server_port=self.config.file_server_port,
-            top_k=self.config.top_k,
-            max_iterations=self.config.max_iterations,
-            max_retries=self.config.max_retries,
-            db_path=self.config.db_path,
-        )
+        d = asdict(self.config)
+        d.pop("api_key", None)  # let __post_init__ re-resolve from keys.json / env
+        d.pop("index_name", None)  # let __post_init__ set index_name = workspace_name
+        d["workspace_name"] = workspace
+        d["document_dirs"] = document_dirs
+        return SearchAgentConfig(**d)
 
     # ------------------------------------------------------------------
     # Scheduler

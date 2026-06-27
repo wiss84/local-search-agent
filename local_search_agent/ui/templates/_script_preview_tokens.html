@@ -1,0 +1,197 @@
+/* =============================================================
+   DOCUMENT PREVIEW PANEL
+   ============================================================= */
+const FILE_SERVER = 'http://127.0.0.1:{{ file_server_port }}';
+let _previewCurrentDocId = null;
+let _previewCurrentText  = null;
+
+async function openPreview(docId, query) {
+  _previewCurrentDocId = docId;
+  const panel = $('preview-panel');
+  $('preview-title').textContent = 'Loading…';
+  $('preview-meta').textContent  = '';
+  $('preview-body').innerHTML    = '<div class="preview-loading">Loading…</div>';
+  panel.classList.remove('hidden');
+
+  try {
+    const params = query ? `?query=${encodeURIComponent(query)}` : '';
+    const r = await fetch(`${FILE_SERVER}/preview/${encodeURIComponent(docId)}${params}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+
+    _previewCurrentText = data.text || '';
+    $('preview-title').textContent = data.title || docId;
+    $('preview-meta').textContent  = data.file_type ? data.file_type.toUpperCase() : '';
+
+    const body = $('preview-body');
+
+    // Parse as markdown first
+    body.innerHTML = renderMarkdown(data.text || '(no text available)');
+
+    // Apply highlighting if query exists
+    if (query && data.text) {
+      const words = [...new Set(
+        query.toLowerCase().split(/\s+/).filter(w => w.length >= 3)
+      )];
+
+      if (words.length > 0) {
+        // Escape special regex chars and add word boundaries for whole-word matching
+        const escaped = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const pattern = escaped.map(w => '\\b' + w + '\\b').join('|');
+        const regex = new RegExp(pattern, 'gi');
+
+        // Walk through all text nodes and highlight matches
+        const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, null, false);
+        const textNodes = [];
+        let node;
+        while (node = walker.nextNode()) {
+          textNodes.push(node);
+        }
+
+        textNodes.forEach(textNode => {
+          const text = textNode.nodeValue;
+          if (regex.test(text)) {
+            regex.lastIndex = 0; // Reset regex state for next test
+            const span = document.createElement('span');
+            const parts = text.split(new RegExp('(' + pattern + ')', 'gi'));
+            span.innerHTML = parts.map((part, i) =>
+              i % 2 === 1
+                ? '<mark>' + escHtml(part) + '</mark>'
+                : escHtml(part)
+            ).join('');
+            textNode.parentNode.replaceChild(span, textNode);
+          }
+        });
+
+        const firstMark = body.querySelector('mark');
+        if (firstMark) firstMark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    }
+
+  } catch (e) {
+    $('preview-body').innerHTML = '<div class="preview-loading">⚠ Could not load preview: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+$('btn-preview-close').addEventListener('click', () => {
+  $('preview-panel').classList.add('hidden');
+  $('preview-panel').classList.remove('maximized');
+  $('icon-preview-expand').style.display = '';
+  $('icon-preview-compress').style.display = 'none';
+  $('btn-preview-maximize').title = 'Maximize preview';
+  _previewCurrentDocId = null;
+  _previewCurrentText  = null;
+  _syncZoomDependentLayout();
+});
+
+$('btn-preview-maximize').addEventListener('click', () => {
+  const panel = $('preview-panel');
+  const maximized = panel.classList.toggle('maximized');
+  $('icon-preview-expand').style.display = maximized ? 'none' : '';
+  $('icon-preview-compress').style.display = maximized ? '' : 'none';
+  $('btn-preview-maximize').title = maximized ? 'Restore preview size' : 'Maximize preview';
+  _syncZoomDependentLayout();
+});
+
+$('btn-preview-open-file').addEventListener('click', () => {
+  if (!_previewCurrentDocId) return;
+  openExternalUrl(`${FILE_SERVER}/docs/${encodeURIComponent(_previewCurrentDocId)}`);
+});
+
+$('btn-preview-copy-text').addEventListener('click', () => {
+  if (!_previewCurrentText) return;
+  navigator.clipboard.writeText(_previewCurrentText).then(() => {
+    const btn = $('btn-preview-copy-text');
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = orig; }, 1800);
+  });
+});
+
+// Intercept docs_url clicks in tool output cards and message bubbles
+// Use all agent search queries for comprehensive highlighting
+document.addEventListener('click', e => {
+  const a = e.target.closest('.tool-json a') || e.target.closest('.msg-bubble a');
+  if (!a) return;
+  const href = a.getAttribute('href') || '';
+  const textMatch = href.match(/\/text\/([a-f0-9]+)/);
+  const docsMatch = href.match(/\/docs\/([a-f0-9]+)/);
+  const match = textMatch || docsMatch;
+  if (!match) return;
+  e.preventDefault();
+  const docId = match[1];
+  // Combine all agent search queries for highlighting, fall back to user's query if none available
+  const allQueries = state.allAgentSearchQueries.length > 0
+    ? state.allAgentSearchQueries.join(' ')
+    : state.queryHistory[0] || '';
+  openPreview(docId, allQueries);
+});
+
+/* =============================================================
+   TOKEN SPARKLINE
+   ============================================================= */
+const tokenDatapoints = [];  // {t: timestamp_ms, cumulative: N, event: 'query'|'reply'}
+
+function drawSparkline() {
+  const canvas = $('token-sparkline');
+  if (!canvas) return;
+  const pts = tokenDatapoints;
+  if (pts.length < 2) { canvas.style.display = 'none'; return; }
+  canvas.style.display = 'inline-block';
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const vals = pts.map(p => p.cumulative);
+  const minV = 0;
+  const maxV = Math.max(...vals) || 1;
+
+  // Draw filled area under the line
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  ctx.beginPath();
+  pts.forEach((p, i) => {
+    const x = (i / (pts.length - 1)) * W;
+    const y = H - ((p.cumulative - minV) / (maxV - minV)) * (H - 2) - 1;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = accent || '#5b7df8';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // Fill below
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+  ctx.fillStyle = (accent || '#5b7df8') + '33';
+  ctx.fill();
+}
+
+/* =============================================================
+   TOKEN DISPLAY
+   ============================================================= */
+function updateTokenDisplay(tq, tr) {
+  if (tq !== undefined) {
+    state.sessionTokens.query += tq;
+    state.sessionTokens.reply += tr;
+    tokenDatapoints.push({
+      t: Date.now(),
+      cumulative: state.sessionTokens.query + state.sessionTokens.reply,
+    });
+    if (tokenDatapoints.length > 200) tokenDatapoints.splice(0, tokenDatapoints.length - 200);
+  }
+  const total = state.sessionTokens.query + state.sessionTokens.reply;
+  if (total === 0) {
+    dom.tokenLabel.textContent = 'Session: 0 tokens';
+    dom.tokenBar.style.width = '0%';
+    return;
+  }
+  // Show cumulative session tokens (query + reply)
+  const fmt = n => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+  dom.tokenLabel.textContent = `Session: ${fmt(total)} tokens (${fmt(state.sessionTokens.query)}↑ ${fmt(state.sessionTokens.reply)}↓)`;
+  drawSparkline();
+  // Keep the hidden bar updated for the color coding logic
+  const limit = getModelContextLimit(state.model);
+  const pct   = limit > 0 ? Math.min((total / limit) * 100, 100) : Math.min((total / 100000) * 100, 100);
+  dom.tokenBar.style.width = pct + '%';
+  dom.tokenBar.style.background =
+    pct > 80 ? 'var(--red)' : pct > 60 ? 'var(--amber)' : 'var(--accent)';
+}
+

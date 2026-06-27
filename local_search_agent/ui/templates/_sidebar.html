@@ -65,10 +65,19 @@
       </label>
     </div>
     <div id="sync-status-hint" class="lp-sync-hint">Auto-sync is off</div>
-    <button class="lp-btn lp-btn-accent" id="btn-export" title="Export conversation as Markdown">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V6z"/><polyline points="9,1 9,6 14,6"/></svg>
-      Export Chat
-    </button>
+    <div class="export-row">
+      <button class="lp-btn lp-btn-accent" id="btn-export" title="Export conversation" style="flex:1">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V6z"/><polyline points="9,1 9,6 14,6"/></svg>
+        Export Chat
+      </button>
+      <button class="lp-btn-icon" id="btn-print-chat" title="Print conversation">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 7V2h8v5"/><rect x="2" y="7" width="12" height="6" rx="1"/><path d="M4 13v2h8v-2"/></svg>
+      </button>
+    </div>
+    <div id="export-menu" class="export-menu hidden">
+      <button data-format="md">Markdown (.md)</button>
+      <button data-format="docx">Word (.docx)</button>
+    </div>
   </div>
 
   <div class="lp-divider"></div>

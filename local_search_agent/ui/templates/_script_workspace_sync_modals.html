@@ -1,0 +1,259 @@
+/* =============================================================
+   WORKSPACE MODAL
+   ============================================================= */
+let pendingDirs = [];
+
+$('btn-new-workspace').addEventListener('click', async () => {
+  pendingDirs = [];
+  $('ws-name-input').value = ''; $('ws-dir-input').value = ''; $('ws-dir-chips').innerHTML = '';
+  $('ws-db-input').value = '';
+  // Show the default db path as a hint
+  try {
+    const info = await api('/db-info');
+    $('ws-db-hint').textContent = 'Default: ' + (info.db_path || '');
+  } catch { $('ws-db-hint').textContent = ''; }
+  $('modal-workspace').classList.remove('hidden');
+  $('ws-name-input').focus();
+});
+$('btn-ws-cancel').addEventListener('click', () => $('modal-workspace').classList.add('hidden'));
+
+$('btn-delete-workspace').addEventListener('click', async (e) => {
+  if (!state.workspace) return;
+  const wipeIndex = e.shiftKey;
+  const msg = wipeIndex
+    ? `Delete workspace "${state.workspace}" AND wipe its Meilisearch index?\n\nThis removes all indexed documents and cannot be undone.`
+    : `Delete workspace "${state.workspace}"?\n\nThe Meilisearch index will be kept (hold Shift while clicking to also wipe the index).`;
+  if (!confirm(msg)) return;
+  try {
+    await api(`/workspaces/${encodeURIComponent(state.workspace)}?wipe=${wipeIndex}`, { method: 'DELETE' });
+    state.workspace = null;
+    state.sessionId = null;
+    state.sessionTokens = { query: 0, reply: 0 };
+    dom.messages.innerHTML = '';
+    clearDrawer();
+    updateTokenDisplay();
+    await loadWorkspaces();
+    await loadSessions();
+  } catch (e) { alert('Delete failed: ' + e.message); }
+});
+
+$('btn-set-db').addEventListener('click', async () => {
+  const newPath = $('ws-db-input').value.trim();
+  if (!newPath) { alert('Please enter a database path first.'); return; }
+  if (!confirm(`Set database path to:\n${newPath}\n\nThe UI will restart now.`)) return;
+  const btn = $('btn-set-db');
+  btn.disabled = true; btn.textContent = 'Restarting…';
+  try {
+    await api('/restart', { method: 'POST', body: JSON.stringify({ db_path: newPath }) });
+    // Server will die shortly — show a message in case the window stays open briefly
+    $('ws-db-hint').textContent = 'Restarting…';
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Set & Restart';
+    alert('Failed to restart: ' + e.message);
+  }
+});
+
+$('btn-browse-dir').addEventListener('click', async () => {
+  if (window.pywebview && window.pywebview.api) {
+    const path = await window.pywebview.api.pick_folder();
+    if (path) addDirChip(path);
+  } else {
+    const val = $('ws-dir-input').value.trim();
+    if (val) { addDirChip(val); $('ws-dir-input').value = ''; }
+  }
+});
+$('ws-dir-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const val = $('ws-dir-input').value.trim();
+    if (val) { addDirChip(val); $('ws-dir-input').value = ''; }
+  }
+});
+function addDirChip(path) {
+  if (pendingDirs.includes(path)) return;
+  pendingDirs.push(path);
+  const chip = document.createElement('div');
+  chip.className = 'dir-chip';
+  chip.innerHTML = `<span>${escHtml(path)}</span><span class="dir-chip-remove" title="Remove">×</span>`;
+  chip.querySelector('.dir-chip-remove').addEventListener('click', () => {
+    pendingDirs = pendingDirs.filter(d => d !== path); chip.remove();
+  });
+  $('ws-dir-chips').appendChild(chip);
+}
+$('btn-ws-create').addEventListener('click', async () => {
+  const name = $('ws-name-input').value.trim();
+  const typed = $('ws-dir-input').value.trim();
+  if (typed) addDirChip(typed);
+  if (!name) { alert('Please enter a workspace name.'); return; }
+  if (pendingDirs.length === 0) { alert('Please add at least one directory.'); return; }
+  try {
+    await api('/workspaces', { method: 'POST', body: JSON.stringify({ name, document_dirs: pendingDirs }) });
+    $('modal-workspace').classList.add('hidden');
+    await loadWorkspaces();
+    dom.workspaceSelect.value = name;
+    state.workspace = name;
+    await loadSessions();
+  } catch (e) { alert('Failed: ' + e.message); }
+});
+
+/* =============================================================
+   SYNC MODAL  (Watch Mode / Polling Scheduler / Off)
+   ============================================================= */
+function _updateSyncModeFields() {
+  const mode = $('sync-mode-select').value;
+  $('sched-interval-field').classList.toggle('hidden', mode !== 'scheduler');
+  $('sched-enrich-on-watch-field').classList.toggle('hidden', mode !== 'watch');
+}
+$('sync-mode-select').addEventListener('change', _updateSyncModeFields);
+
+/* ── Sidebar quick on/off toggle ── */
+async function _getCurrentSyncMode(workspace) {
+  let watchRunning = false, schedRunning = false;
+  try { const ws = await api('/watch/status'); watchRunning = !!ws.running && (ws.registered_workspaces || []).includes(workspace); } catch {}
+  try { const ss = await api('/scheduler/status'); schedRunning = !!ss.running; } catch {}
+  if (watchRunning) return 'watch';
+  if (schedRunning) return 'scheduler';
+  return 'off';
+}
+
+async function refreshSyncToggle() {
+  const toggle = $('toggle-sync-enabled');
+  const hint = $('sync-status-hint');
+  if (!state.workspace) { toggle.checked = false; hint.textContent = 'Auto-sync is off'; hint.classList.remove('on'); return; }
+  const mode = await _getCurrentSyncMode(state.workspace);
+  toggle.checked = mode !== 'off';
+  if (mode === 'watch') {
+    hint.textContent = 'Auto-sync is on (Watch Mode)';
+    hint.classList.add('on');
+  } else if (mode === 'scheduler') {
+    hint.textContent = 'Auto-sync is on (Scheduler)';
+    hint.classList.add('on');
+  } else {
+    hint.textContent = 'Auto-sync is off';
+    hint.classList.remove('on');
+  }
+}
+
+$('toggle-sync-enabled').addEventListener('change', async () => {
+  const toggle = $('toggle-sync-enabled');
+  const turningOn = toggle.checked;
+  if (!state.workspace) { toggle.checked = false; return; }
+  toggle.disabled = true;
+  try {
+    if (turningOn) {
+      // Default to Watch Mode unless the user previously configured polling
+      // via the Sync modal (persisted as enable_watch_mode in settings.json).
+      let useWatch = true;
+      try {
+        const wms = await api('/settings/watch-mode');
+        useWatch = wms.enable_watch_mode !== false;
+      } catch {}
+      if (useWatch) {
+        await api('/watch', { method: 'POST', body: JSON.stringify({ workspace: state.workspace }) });
+        await api('/scheduler', { method: 'DELETE' }).catch(() => {});
+      } else {
+        await api('/scheduler', { method: 'POST', body: JSON.stringify({ workspace: state.workspace, interval_minutes: 15 }) });
+        await api('/watch', { method: 'DELETE' }).catch(() => {});
+      }
+    } else {
+      await api('/watch', { method: 'DELETE' }).catch(() => {});
+      await api('/scheduler', { method: 'DELETE' }).catch(() => {});
+    }
+  } catch (e) {
+    alert('Sync toggle failed: ' + e.message);
+  } finally {
+    toggle.disabled = false;
+    await refreshSyncToggle();
+  }
+});
+
+// Refresh the sidebar toggle whenever the workspace changes
+dom.workspaceSelect.addEventListener('change', refreshSyncToggle);
+
+$('btn-scheduler').addEventListener('click', async () => {
+  const sel = $('sched-workspace-select');
+  sel.innerHTML = state.workspaces.map(w => `<option value="${escHtml(w.name)}">${escHtml(w.name)}</option>`).join('');
+  if (state.workspace) sel.value = state.workspace;
+
+  // Determine the actual current mode by checking what's running, not just
+  // the persisted preference — this is the source of truth for the dropdown.
+  let watchRunning = false, schedRunning = false;
+  try { const ws = await api('/watch/status'); watchRunning = !!ws.running && (ws.registered_workspaces || []).includes(sel.value); } catch {}
+  try { const ss = await api('/scheduler/status'); schedRunning = !!ss.running; } catch {}
+
+  let currentMode = 'off';
+  if (watchRunning) currentMode = 'watch';
+  else if (schedRunning) currentMode = 'scheduler';
+  $('sync-mode-select').value = currentMode;
+
+  // Load persisted enrich_on_watch preference regardless of mode (used if/when watch is selected)
+  try {
+    const wms = await api('/settings/watch-mode');
+    $('toggle-enrich-on-watch').checked = wms.enrich_on_watch !== false; // default true
+  } catch { $('toggle-enrich-on-watch').checked = true; }
+
+  _updateSyncModeFields();
+  $('modal-scheduler').classList.remove('hidden');
+});
+$('btn-sched-cancel').addEventListener('click', () => $('modal-scheduler').classList.add('hidden'));
+
+$('btn-sched-save').addEventListener('click', async () => {
+  const workspace = $('sched-workspace-select').value;
+  const mode      = $('sync-mode-select').value;
+  const btn       = $('btn-sched-save');
+
+  if (mode === 'scheduler') {
+    const interval = parseInt($('sched-interval-input').value, 10);
+    if (!interval || interval < 1) { alert('Please enter a valid interval.'); return; }
+  }
+
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    if (mode === 'watch') {
+      const enrichOnWatch = $('toggle-enrich-on-watch').checked;
+      await api('/settings/watch-mode', {
+        method: 'POST',
+        body: JSON.stringify({ enable_watch_mode: true, enrich_on_watch: enrichOnWatch }),
+      });
+      await api('/watch', { method: 'POST', body: JSON.stringify({ workspace }) });
+      // Mutually exclusive: make sure the polling scheduler isn't also running.
+      await api('/scheduler', { method: 'DELETE' }).catch(() => {});
+
+    } else if (mode === 'scheduler') {
+      const interval = parseInt($('sched-interval-input').value, 10);
+      await api('/settings/watch-mode', {
+        method: 'POST',
+        body: JSON.stringify({ enable_watch_mode: false, enrich_on_watch: $('toggle-enrich-on-watch').checked }),
+      });
+      await api('/scheduler', { method: 'POST', body: JSON.stringify({ workspace, interval_minutes: interval }) });
+      // Mutually exclusive: make sure watch mode isn't also running.
+      await api('/watch', { method: 'DELETE' }).catch(() => {});
+
+    } else {
+      // Off — stop both, leave only manual ingest available.
+      await api('/watch', { method: 'DELETE' }).catch(() => {});
+      await api('/scheduler', { method: 'DELETE' }).catch(() => {});
+      await api('/settings/watch-mode', {
+        method: 'POST',
+        body: JSON.stringify({ enable_watch_mode: false, enrich_on_watch: $('toggle-enrich-on-watch').checked }),
+      });
+    }
+    $('modal-scheduler').classList.add('hidden');
+  } catch (e) {
+    alert('Sync error: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+  await refreshSyncToggle();
+});
+
+/* =============================================================
+   KEYBOARD SHORTCUTS
+   ============================================================= */
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === '/') { e.preventDefault(); dom.toolDrawer.classList.toggle('collapsed'); }
+  if (e.ctrlKey && e.key === 'n' && !e.shiftKey && document.activeElement !== dom.queryInput) {
+    e.preventDefault(); newChat();
+  }
+});
+

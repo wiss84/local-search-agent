@@ -1,0 +1,206 @@
+/* =============================================================
+   QUERY + SSE STREAM
+   ============================================================= */
+async function sendQuery() {
+  const question = dom.queryInput.value.trim();
+  if (!question || state.streaming) return;
+
+  if (!state.sessionId) await newChat();
+  if (!state.sessionId) return;
+
+  state.queryHistory.unshift(question);
+  if (state.queryHistory.length > 50) state.queryHistory.pop();
+  state.historyIndex = -1;
+  state.allAgentSearchQueries = [];  // Reset for new query submission
+
+  dom.queryInput.value = '';
+  autoResizeTextarea();
+  appendMessage('user', question, { time: new Date().toISOString() });
+
+  if (!dom.toolDrawer.classList.contains('collapsed') || state.drawerPinned) {
+    clearDrawer();
+  } else {
+    dom.toolDrawer.classList.remove('collapsed');
+    clearDrawer();
+  }
+
+  const typingEl = appendTypingIndicator();
+  state.streaming = true;
+  dom.btnSend.disabled = true;
+  dom.agentMsg.textContent = '⚙ Running…';
+
+  let assembledText = '';
+
+  try {
+    const res = await fetch(API + '/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: state.sessionId,
+        question,
+        workspace: state.workspace,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || res.statusText);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      let eventType = null;
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          eventType = line.slice(7).trim();
+        } else if (line.startsWith('data: ') && eventType) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            handleSSEEvent(eventType, data);
+            if (eventType === 'text_chunk') assembledText += data.text || '';
+          } catch { /* malformed JSON, skip */ }
+          eventType = null;
+        }
+      }
+    }
+
+  } catch (e) {
+    typingEl.remove();
+    appendMessage('assistant', `⚠ Error: ${e.message}`, { error: true, time: new Date().toISOString() });
+    dom.agentMsg.textContent = 'Error';
+    state.streaming = false;
+    dom.btnSend.disabled = false;
+    return;
+  }
+
+  // Convert the typing indicator into the final message bubble in-place
+  // (avoids a duplicate render: the indicator already has the streamed text)
+  const typingBubble = typingEl ? typingEl.querySelector('.msg-bubble') : null;
+  if (typingBubble && assembledText) {
+    typingBubble.innerHTML = renderMarkdown(assembledText);
+    attachTableExportButtons(typingBubble);
+    // Add timestamp
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+    meta.textContent = fmtTime(new Date().toISOString());
+    typingEl.appendChild(meta);
+    // Remove the id so it's no longer the typing indicator
+    typingEl.removeAttribute('id');
+  } else if (typingEl) {
+    typingEl.remove();
+    if (assembledText) {
+      appendMessage('assistant', assembledText, { time: new Date().toISOString() });
+    }
+  }
+
+  dom.agentMsg.textContent = 'Ready';
+  state.streaming = false;
+  dom.btnSend.disabled = false;
+  loadSessions();
+}
+
+function handleSSEEvent(type, data) {
+  switch (type) {
+    case 'thinking':
+      addThinkingCard(data.text);
+      break;
+    case 'tool_start':
+      addToolStartCard(data.tool, data.input, data.call_id);
+      dom.agentMsg.textContent = `🔧 ${data.tool}`;
+      // Collect all agent search queries for highlighting (from search tools)
+      if (data.tool && data.tool.includes('search') && data.input) {
+        const searchQuery = data.input.query || data.input.search_query || data.input.text || '';
+        if (searchQuery && !state.allAgentSearchQueries.includes(searchQuery)) {
+          state.allAgentSearchQueries.push(searchQuery);
+        }
+      }
+      break;
+    case 'tool_end':
+      updateToolEndCard(data.tool, data.output, data.duration_ms, data.call_id);
+      break;
+    case 'text_chunk': {
+      const typing = $('typing-indicator');
+      if (typing) {
+        const bubble = typing.querySelector('.msg-bubble');
+        if (bubble) {
+          if (bubble.querySelector('.typing-dots')) bubble.innerHTML = '';
+          bubble.dataset.partial = (bubble.dataset.partial || '') + data.text;
+          bubble.innerHTML = renderMarkdown(bubble.dataset.partial);
+          scrollBottom();
+        }
+      }
+      dom.agentMsg.textContent = '✍ Writing…';
+      break;
+    }
+    case 'token_update': {
+      // Show live running totals for the current query without committing to session yet.
+      // We temporarily add the current-query tokens on top of the previous session total.
+      const prevTotal = state.sessionTokens.query + state.sessionTokens.reply;
+      const liveTotal = prevTotal + data.token_query + data.token_reply;
+      const fmt = n => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+      dom.tokenLabel.textContent = `Session: ${fmt(liveTotal)} tokens (${fmt(state.sessionTokens.query + data.token_query)}↑ ${fmt(state.sessionTokens.reply + data.token_reply)}↓)`;
+      const limit = getModelContextLimit(state.model);
+      const pct   = limit > 0 ? Math.min((liveTotal / limit) * 100, 100) : Math.min((liveTotal / 100000) * 100, 100);
+      dom.tokenBar.style.width = pct + '%';
+      dom.tokenBar.style.background =
+        pct > 80 ? 'var(--red)' : pct > 60 ? 'var(--amber)' : 'var(--accent)';
+      break;
+    }
+    case 'done':
+      updateTokenDisplay(data.token_query, data.token_reply);
+      dom.agentMsg.textContent = 'Ready';
+      break;
+    case 'error': {
+      const typingEl = $('typing-indicator');
+      if (typingEl) typingEl.remove();
+      appendMessage('assistant', `⚠ ${data.message}`, { error: true, time: new Date().toISOString() });
+      break;
+    }
+  }
+}
+
+/* =============================================================
+   INPUT EVENTS
+   ============================================================= */
+dom.btnSend.addEventListener('click', sendQuery);
+
+dom.queryInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.ctrlKey && !e.shiftKey) {
+    e.preventDefault(); sendQuery(); return;
+  }
+  if (e.key === 'Enter' && e.ctrlKey) {
+    // Insert newline
+    e.preventDefault();
+    const ta = dom.queryInput;
+    const start = ta.selectionStart;
+    const end   = ta.selectionEnd;
+    ta.value = ta.value.slice(0, start) + '\n' + ta.value.slice(end);
+    ta.selectionStart = ta.selectionEnd = start + 1;
+    autoResizeTextarea();
+    return;
+  }
+  if (e.key === 'ArrowUp' && dom.queryInput.value === '') {
+    e.preventDefault();
+    state.historyIndex = Math.min(state.historyIndex + 1, state.queryHistory.length - 1);
+    if (state.historyIndex >= 0) dom.queryInput.value = state.queryHistory[state.historyIndex];
+    autoResizeTextarea(); return;
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    state.historyIndex = Math.max(state.historyIndex - 1, -1);
+    dom.queryInput.value = state.historyIndex >= 0 ? state.queryHistory[state.historyIndex] : '';
+    autoResizeTextarea(); return;
+  }
+});
+dom.queryInput.addEventListener('input', autoResizeTextarea);
+

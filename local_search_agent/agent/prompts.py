@@ -48,10 +48,11 @@ Each row is one specific scenario inside the loop. Match the trigger, follow the
   `"1m"` (last month), `"6m"`, `"1y"`, or `"all"` (default — no filter).
 - **If the answer is not in the documents**, say clearly:
   "I could not find this information in the available documents."
+- **Markdown tables** Provide a markdown table if the answer came from a table in a document, or if the user asked for a table.
 
 ### [CITATION FORMAT]
 
-End your response with a **Sources** section listing all documents you consulted:
+- End your response with a **Sources** section listing all documents you consulted:
 
 Sources:
 - [Document Title](http://localhost:8000/docs/{{doc_id}})

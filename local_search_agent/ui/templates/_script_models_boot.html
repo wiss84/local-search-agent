@@ -1,0 +1,152 @@
+/* =============================================================
+   MODEL DROPDOWN — load and repopulate on provider change
+   ============================================================= */
+let _allModels = {};
+
+async function loadModels() {
+  try {
+    const data = await api('/models');
+    _allModels = data.models || {};
+    repopulateModelDropdown(state.provider);
+  } catch (e) {
+    console.warn('Could not load models:', e);
+  }
+}
+
+function repopulateModelDropdown(provider) {
+  const sel = dom.modelInput;
+  const models = _allModels[provider] || [];
+  const current = state.model;
+  sel.innerHTML = models.map(m =>
+    `<option value="${escHtml(m)}"${m === current ? ' selected' : ''}>${escHtml(m)}</option>`
+  ).join('');
+  if (models.length === 0) {
+    sel.innerHTML = '<option value="" disabled selected>No models — add via Settings</option>';
+  } else if (!models.includes(current)) {
+    state.model = models[0];
+    sel.value = models[0];
+    api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.model', value: models[0] }) })
+      .catch(e => console.warn('Could not persist model change:', e));
+  }
+}
+
+dom.providerSelect.addEventListener('change', async () => {
+  state.provider = dom.providerSelect.value;
+  repopulateModelDropdown(state.provider);
+  await api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.provider', value: state.provider }) });
+});
+
+dom.modelInput.addEventListener('change', async () => {
+  state.model = dom.modelInput.value;
+  if (state.model) {
+    await api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.model', value: state.model }) });
+    updateTokenDisplay();
+  }
+});
+
+/* =============================================================
+   MODEL MANAGER
+   ============================================================= */
+function renderModelList(models) {
+  const container = $('model-list-container');
+  container.innerHTML = '';
+  const providers = ['google', 'openai', 'anthropic', 'ollama'];
+  providers.forEach(provider => {
+    const list = models[provider] || [];
+    const group = document.createElement('div');
+    group.className = 'model-provider-group';
+    group.innerHTML = `<div class="model-provider-header">${provider}</div>`;
+    if (list.length === 0) {
+      group.innerHTML += '<div class="model-item" style="color:var(--text-muted)">No models added</div>';
+    } else {
+      list.forEach(model => {
+        const item = document.createElement('div');
+        item.className = 'model-item';
+        item.innerHTML = `
+          <span class="model-item-name">${escHtml(model)}</span>
+          <button class="model-item-delete" data-provider="${escHtml(provider)}" data-model="${escHtml(model)}">Remove</button>
+        `;
+        group.appendChild(item);
+      });
+    }
+    container.appendChild(group);
+  });
+  container.querySelectorAll('.model-item-delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const provider = btn.dataset.provider;
+      const model = btn.dataset.model;
+      if (!confirm(`Remove "${model}" from ${provider}?`)) return;
+      try {
+        const data = await api('/models', {
+          method: 'DELETE',
+          body: JSON.stringify({ provider, model_name: model }),
+        });
+        _allModels = data.models || _allModels;
+        renderModelList(_allModels);
+        repopulateModelDropdown(state.provider);
+      } catch (e) {
+        $('model-mgr-status').textContent = '✗ ' + (e.message || 'Failed');
+        $('model-mgr-status').className = 'key-status err';
+      }
+    });
+  });
+}
+
+$('btn-model-add').addEventListener('click', async () => {
+  const provider = $('model-mgr-provider').value;
+  const name = $('model-mgr-name').value.trim();
+  if (!name) { $('model-mgr-status').textContent = 'Enter a model name.'; $('model-mgr-status').className = 'key-status err'; return; }
+  try {
+    const data = await api('/models', {
+      method: 'POST',
+      body: JSON.stringify({ provider, model_name: name }),
+    });
+    _allModels = data.models || _allModels;
+    $('model-mgr-name').value = '';
+    renderModelList(_allModels);
+    repopulateModelDropdown(state.provider);
+    $('model-mgr-status').textContent = '✓ Added';
+    $('model-mgr-status').className = 'key-status ok';
+    setTimeout(() => { $('model-mgr-status').textContent = ''; $('model-mgr-status').className = 'key-status'; }, 2000);
+  } catch (e) {
+    $('model-mgr-status').textContent = '✗ ' + (e.message || 'Failed');
+    $('model-mgr-status').className = 'key-status err';
+  }
+});
+
+/* =============================================================
+   BOOT
+   ============================================================= */
+window.addEventListener('resize', _syncZoomDependentLayout);
+document.addEventListener('DOMContentLoaded', _syncZoomDependentLayout);
+
+async function boot() {
+  console.log('🚀 Booting Local Search Agent UI...');
+  await loadConfig();
+  console.log('✓ Config loaded');
+  await loadModels();
+  console.log('✓ Models loaded');
+  dom.providerSelect.value = state.provider;
+  await loadWorkspaces();
+  console.log('✓ Workspaces loaded:', state.workspaces.length, 'workspaces');
+  if (state.workspace) {
+    console.log('📂 Active workspace:', state.workspace);
+    await loadSessions();
+    if (state.sessions.length > 0) {
+      await loadSession(state.sessions[0].session_id);
+    } else {
+      await newChat();
+    }
+    await refreshSyncToggle();
+  } else {
+    console.warn('⚠️  No workspace selected. Create one to start.');
+  }
+  updateTokenDisplay();
+  console.log('🔍 Starting health checks...');
+  pollHealth();
+  setInterval(pollHealth, 15000);
+  console.log('✅ Boot complete');
+}
+
+boot().catch(e => console.error('Boot error:', e));
+</script>

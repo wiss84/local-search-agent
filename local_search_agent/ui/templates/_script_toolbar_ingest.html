@@ -1,0 +1,326 @@
+/* =============================================================
+   PROVIDER / MODEL CONFIG
+   ============================================================= */
+async function loadConfig() {
+  try {
+    const cfg = await api('/config');
+    if (cfg['global.provider']) { state.provider = cfg['global.provider']; dom.providerSelect.value = state.provider; }
+    if (cfg['global.model'])    { state.model    = cfg['global.model']; }
+    if (cfg['global.theme'] === 'light') {
+      document.documentElement.classList.add('light');
+      $('icon-moon').style.display = 'none';
+      $('icon-sun').style.display  = '';
+    }
+    if (cfg['global.uiZoom']) {
+      _applyZoom(parseInt(cfg['global.uiZoom'], 10));
+    }
+  } catch { /* first launch */ }
+}
+
+// Provider and model change handlers are defined in the MODEL DROPDOWN section above
+
+/* =============================================================
+   TOOLBAR BUTTONS
+   ============================================================= */
+$('btn-drawer-toggle').addEventListener('click', () => dom.toolDrawer.classList.toggle('collapsed'));
+$('btn-pin-drawer').addEventListener('click', () => {
+  state.drawerPinned = !state.drawerPinned;
+  $('btn-pin-drawer').classList.toggle('pinned', state.drawerPinned);
+});
+$('btn-theme').addEventListener('click', async () => {
+  const isLight = document.documentElement.classList.toggle('light');
+  $('icon-moon').style.display = isLight ? 'none' : '';
+  $('icon-sun').style.display  = isLight ? '' : 'none';
+  await api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.theme', value: isLight ? 'light' : 'dark' }) });
+});
+
+/* =============================================================
+   UI ZOOM
+   ============================================================= */
+let _currentZoomFactor = 1;
+
+function _cssVarPx(name, fallback) {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const n = parseFloat(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+// `zoom` visually shrinks/grows the whole rendered tree, but it does NOT
+// change what 100vh/100vw evaluate to — they stay pinned to the real,
+// unscaled window size. Anything sized with vh/vw (or a JS-read
+// window.innerHeight/innerWidth) therefore falls short of (or overshoots)
+// the actual screen once the visual rescale is applied. We compensate by
+// explicitly sizing the zoom-sensitive elements ourselves, in one place.
+function _syncZoomDependentLayout() {
+  const z = _currentZoomFactor || 1;
+  const fullHeight = window.innerHeight / z;
+  const fullWidth  = window.innerWidth  / z;
+
+  const app = document.getElementById('app');
+  if (app) app.style.height = fullHeight + 'px';
+
+  const panel = document.getElementById('preview-panel');
+  if (panel) {
+    const topbarPx    = _cssVarPx('--topbar-h', 48);
+    const statusbarPx = _cssVarPx('--statusbar-h', 36);
+
+    if (panel.classList.contains('maximized')) {
+      // Maximizing escapes the ambient UI zoom for this one element.
+      // Nested `zoom` values compound multiplicatively, so setting the
+      // panel's own zoom to (100 / z)% cancels the ambient zoom exactly,
+      // making the panel render at true native 1:1 scale — same as the
+      // already-correct 100%-zoom case. Once cancelled, we can size it
+      // directly off the real screen dimensions with no further math.
+      // The topbar/statusbar still render at the *ambient* zoom though,
+      // so we align against their real on-screen size (authored px × z).
+      const topbarRealPx    = topbarPx * z;
+      const statusbarRealPx = statusbarPx * z;
+      panel.style.zoom   = (100 / z) + '%';
+      panel.style.left   = '0px';
+      panel.style.right  = 'auto';
+      panel.style.top    = topbarRealPx + 'px';
+      panel.style.width  = window.innerWidth + 'px';
+      panel.style.height = (window.innerHeight - topbarRealPx - statusbarRealPx) + 'px';
+    } else {
+      panel.style.zoom   = '';
+      panel.style.left   = '';
+      panel.style.right  = '';
+      panel.style.top    = '';
+      panel.style.width  = '';
+      // Sidebar width (420px from CSS) is small and fixed — it isn't meant
+      // to span "the rest of the screen", so no width compensation is
+      // needed there. Height still needs it since it does need to reach
+      // the bottom while inheriting the ambient zoom normally.
+      panel.style.height = (fullHeight - topbarPx - statusbarPx) + 'px';
+    }
+  }
+}
+
+function _applyZoom(pct) {
+  pct = Math.max(70, Math.min(150, pct));
+  _currentZoomFactor = pct / 100;
+  document.documentElement.style.zoom = pct + '%';
+  $('zoom-label').textContent = pct + '%';
+  $('zoom-slider').value = pct;
+  _syncZoomDependentLayout();
+  return pct;
+}
+
+async function _persistZoom(pct) {
+  try {
+    await api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.uiZoom', value: pct }) });
+  } catch (e) { console.warn('Could not persist zoom level:', e); }
+}
+
+$('btn-zoom').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const panel = $('zoom-panel');
+  const willShow = panel.classList.contains('hidden');
+  if (willShow) {
+    const rect = $('btn-zoom').getBoundingClientRect();
+    panel.style.top = (rect.bottom + 6) + 'px';
+    panel.style.right = (window.innerWidth - rect.right) + 'px';
+  }
+  panel.classList.toggle('hidden');
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#zoom-panel') && !e.target.closest('#btn-zoom')) {
+    $('zoom-panel').classList.add('hidden');
+  }
+});
+
+// Live update while dragging, persist only once the user lets go
+$('zoom-slider').addEventListener('input', () => {
+  _applyZoom(parseInt($('zoom-slider').value, 10));
+});
+$('zoom-slider').addEventListener('change', () => {
+  _persistZoom(parseInt($('zoom-slider').value, 10));
+});
+// Double-click the slider to snap back to 100%
+$('zoom-slider').addEventListener('dblclick', () => {
+  _applyZoom(100);
+  _persistZoom(100);
+});
+
+$('zoom-out').addEventListener('click', () => {
+  const pct = _applyZoom(parseInt($('zoom-slider').value, 10) - 10);
+  _persistZoom(pct);
+});
+$('zoom-in').addEventListener('click', () => {
+  const pct = _applyZoom(parseInt($('zoom-slider').value, 10) + 10);
+  _persistZoom(pct);
+});
+$('btn-export').addEventListener('click', async () => {
+  if (!state.sessionId) { alert('No active session to export.'); return; }
+  $('export-menu').classList.toggle('hidden');
+});
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#export-menu') && e.target.id !== 'btn-export') {
+    $('export-menu').classList.add('hidden');
+  }
+});
+
+function _exportFilenameBase() {
+  return `chat-${(state.sessionId || 'untitled').slice(0, 8)}`;
+}
+
+/**
+ * Save an export via the pywebview folder-picker + backend write, or fall
+ * back to a browser download blob if no pywebview bridge is available.
+ * Returns true if pywebview handled it, false if the caller must fall back.
+ */
+async function _saveViaPywebview(endpoint, filename, extraBody) {
+  if (!(window.pywebview && window.pywebview.api)) return false;
+  const folder = await window.pywebview.api.pick_folder();
+  if (!folder) return true; // user cancelled — treat as handled, no further fallback
+  await api(endpoint, { method: 'POST', body: JSON.stringify({ folder, filename, ...extraBody }) });
+  return true;
+}
+
+async function exportChatMarkdown() {
+  const data = await api(`/sessions/${state.sessionId}/messages`);
+  const lines = (data.messages || []).map(m =>
+    `## ${m.role === 'user' ? 'You' : 'Assistant'}\n\n${m.content}\n`
+  );
+  const md = lines.join('\n---\n\n');
+  const filename = `${_exportFilenameBase()}.md`;
+
+  const handled = await _saveViaPywebview('/export-chat', filename, { content: md });
+  if (handled) return;
+
+  // Fallback for plain browser
+  const url = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+async function exportChatWord() {
+  const data = await api(`/sessions/${state.sessionId}/messages`);
+  const messages = (data.messages || []).map(m => ({ role: m.role, content: m.content }));
+  const filename = `${_exportFilenameBase()}.docx`;
+
+  const handled = await _saveViaPywebview('/export-chat-docx', filename, { messages });
+  if (!handled) alert('Word export requires the desktop app (pywebview).');
+}
+
+$('export-menu').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-format]');
+  if (!btn) return;
+  $('export-menu').classList.add('hidden');
+  try {
+    if (btn.dataset.format === 'md') await exportChatMarkdown();
+    else if (btn.dataset.format === 'docx') await exportChatWord();
+  } catch (e) { alert('Export failed: ' + e.message); }
+});
+
+$('btn-print-chat').addEventListener('click', () => {
+  if (!state.sessionId) { alert('No active session to print.'); return; }
+  window.print();
+});
+
+/* =============================================================
+   INGEST — live progress in status bar + toast
+   ============================================================= */
+let _ingestPollTimer = null;
+
+function _startIngestPoll(workspace, force) {
+  if (_ingestPollTimer) clearInterval(_ingestPollTimer);
+
+  const statusEl = $('ingest-status');
+  const toast    = $('ingest-toast');
+  const toastMsg = $('ingest-toast-msg');
+
+  // Show both indicators immediately
+  toast.classList.remove('hidden');
+  toastMsg.textContent = force
+    ? `Force re-ingesting "${workspace}"…`
+    : `Ingesting "${workspace}" (changed files)…`;
+  statusEl.className = 'running';
+  statusEl.style.display = '';
+  statusEl.innerHTML = '<span class="ingest-spinner"></span> Starting…';
+
+  _ingestPollTimer = setInterval(async () => {
+    try {
+      const data = await api('/ingest/status');
+      const ws = (data.workspaces || []).find(w => w.workspace === workspace);
+      if (!ws) return;
+
+      const { status, processed, total, indexed, skipped, failed, elapsed_s, error } = ws;
+
+      if (status === 'running') {
+        const pct   = total > 0 ? Math.round((processed / total) * 100) : 0;
+        const label = total > 0 ? `${processed} / ${total} files (${pct}%)` : 'Scanning…';
+        statusEl.innerHTML = `<span class="ingest-spinner"></span> Indexing: ${label}`;
+        toastMsg.textContent = total > 0
+          ? `${force ? 'Force ingest' : 'Ingest'}: ${processed}/${total} files (${pct}%) — ${ws.elapsed_fmt || elapsed_s + 's'}`
+          : `${force ? 'Force ingest' : 'Ingest'}: scanning files…`;
+
+      } else if (status === 'done') {
+        clearInterval(_ingestPollTimer); _ingestPollTimer = null;
+        const summary = `${total} files → ${indexed} chunks${failed > 0 ? `, ${failed} failed` : ''} — ${ws.elapsed_fmt || elapsed_s + 's'}`;
+        statusEl.className = 'done';
+        statusEl.innerHTML = `✓ ${summary}`;
+        toastMsg.textContent = `✓ ${force ? 'Force ingest' : 'Ingest'} complete: ${summary}`;
+        setTimeout(() => toast.classList.add('hidden'), 4000);
+        setTimeout(() => { statusEl.style.display = 'none'; statusEl.className = ''; }, 8000);
+
+      } else if (status === 'error') {
+        clearInterval(_ingestPollTimer); _ingestPollTimer = null;
+        statusEl.className = 'error';
+        statusEl.innerHTML = `✗ Error: ${error || 'unknown'}`;
+        toastMsg.textContent = `✗ Ingest failed: ${error || 'unknown'}`;
+        setTimeout(() => toast.classList.add('hidden'), 6000);
+        setTimeout(() => { statusEl.style.display = 'none'; statusEl.className = ''; }, 12000);
+      }
+    } catch (e) { console.warn('ingest poll:', e); }
+  }, 1000);
+}
+
+async function triggerIngest(force = false) {
+  if (!state.workspace) return;
+  try {
+    await api('/ingest', { method: 'POST', body: JSON.stringify({ workspace: state.workspace, force }) });
+    _startIngestPoll(state.workspace, force);
+  } catch (e) {
+    $('ingest-toast').classList.remove('hidden');
+    $('ingest-toast-msg').textContent = '✗ Ingest failed: ' + e.message;
+    setTimeout(() => $('ingest-toast').classList.add('hidden'), 4000);
+  }
+}
+
+$('btn-wipe-ingest').addEventListener('click', async () => {
+  if (!state.workspace) return;
+  const confirmed = confirm(
+    `⚠️ WIPE & RE-INGEST "${state.workspace}"
+
+This will:
+  • Delete ALL indexed documents from Meilisearch
+  • Clear all document records from the database
+  • Re-ingest every file from scratch
+
+This cannot be undone. Continue?`
+  );
+  if (!confirmed) return;
+  try {
+    const res = await api('/ingest/wipe', {
+      method: 'POST',
+      body: JSON.stringify({ workspace: state.workspace }),
+    });
+    _startIngestPoll(state.workspace, true);
+  } catch (e) {
+    $('ingest-toast').classList.remove('hidden');
+    $('ingest-toast-msg').textContent = '✗ Wipe failed: ' + e.message;
+    setTimeout(() => $('ingest-toast').classList.add('hidden'), 5000);
+  }
+});
+
+$('btn-ingest').addEventListener('click', () => triggerIngest(false));
+$('btn-force-ingest').addEventListener('click', () => {
+  if (!state.workspace) return;
+  if (!confirm(`Force re-ingest ALL files in "${state.workspace}"?\nThis re-processes every file regardless of modification time.`)) return;
+  triggerIngest(true);
+});
+

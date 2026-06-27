@@ -218,6 +218,19 @@ class AdvancedSettingsRequest(BaseModel):
     overrides: dict  # keys from _ADVANCED_SETTING_KEYS, values are ints/floats or None
 
 
+class ExportDocxRequest(BaseModel):
+    folder: str
+    filename: str = "chat.docx"
+    messages: list[dict]
+
+
+class ExportTableXlsxRequest(BaseModel):
+    folder: str
+    filename: str = "table.xlsx"
+    headers: list[str]
+    rows: list[list] = []
+
+
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
@@ -964,6 +977,94 @@ def build_ui_router(app_state) -> APIRouter:
                 subprocess.Popen(["xdg-open", filepath])
         except Exception as e:
             logger.warning("Could not open exported file: %s", e)
+
+        return JSONResponse({"ok": True, "path": filepath})
+
+    # ----------------------------------------------------------------
+    # Export chat — Word (.docx)
+    # ----------------------------------------------------------------
+
+    @router.post("/export-chat-docx")
+    async def export_chat_docx(body: ExportDocxRequest) -> JSONResponse:
+        import os
+
+        from local_search_agent.ui.export_docx import build_docx
+
+        folder = body.folder.strip()
+        if not folder or not os.path.isdir(folder):
+            raise HTTPException(400, detail=f"Invalid folder: {folder!r}")
+
+        filename = os.path.basename(body.filename) or "chat.docx"
+        if not filename.lower().endswith(".docx"):
+            filename += ".docx"
+        filepath = os.path.join(folder, filename)
+
+        try:
+            docx_bytes = build_docx(body.messages, app_state.workspace_manager)
+        except Exception as e:
+            logger.exception("Word export failed: %s", e)
+            raise HTTPException(500, detail=f"Word export failed: {e}")
+
+        with open(filepath, "wb") as f:
+            f.write(docx_bytes)
+
+        import subprocess
+        import sys
+
+        try:
+            if sys.platform == "win32":
+                os.startfile(filepath)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", filepath])
+            else:
+                subprocess.Popen(["xdg-open", filepath])
+        except Exception as e:
+            logger.warning("Could not open exported Word file: %s", e)
+
+        return JSONResponse({"ok": True, "path": filepath})
+
+    # ----------------------------------------------------------------
+    # Export a single table from a chat answer — Excel (.xlsx)
+    # ----------------------------------------------------------------
+
+    @router.post("/export-table-xlsx")
+    async def export_table_xlsx(body: ExportTableXlsxRequest) -> JSONResponse:
+        import os
+
+        from local_search_agent.ui.export_xlsx import build_xlsx
+
+        folder = body.folder.strip()
+        if not folder or not os.path.isdir(folder):
+            raise HTTPException(400, detail=f"Invalid folder: {folder!r}")
+        if not body.headers:
+            raise HTTPException(400, detail="Table has no headers to export.")
+
+        filename = os.path.basename(body.filename) or "table.xlsx"
+        if not filename.lower().endswith(".xlsx"):
+            filename += ".xlsx"
+        filepath = os.path.join(folder, filename)
+
+        try:
+            xlsx_bytes = build_xlsx(body.headers, body.rows)
+        except Exception as e:
+            logger.exception("Excel export failed: %s", e)
+            raise HTTPException(500, detail=f"Excel export failed: {e}")
+
+        with open(filepath, "wb") as f:
+            f.write(xlsx_bytes)
+
+        import subprocess
+        import sys
+
+        try:
+            if sys.platform == "win32":
+                os.startfile(filepath)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", filepath])
+            else:
+                subprocess.Popen(["xdg-open", filepath])
+        except Exception as e:
+            logger.warning("Could not open exported Excel file: %s", e)
 
         return JSONResponse({"ok": True, "path": filepath})
 

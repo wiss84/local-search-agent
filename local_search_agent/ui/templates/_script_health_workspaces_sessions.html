@@ -1,0 +1,162 @@
+/* =============================================================
+   HEALTH POLLING
+   ============================================================= */
+async function pollHealth() {
+  try {
+    const h = await api('/health');
+    dom.dotServer.className = 'status-dot ok';
+    // Meilisearch can be "ok", "offline", or error message; we show ok or err
+    const meiliStatus = (h && h.meilisearch === 'ok') ? 'ok' : 'err';
+    dom.dotMeili.className  = `status-dot ${meiliStatus}`;
+    if (meiliStatus !== 'ok') {
+      console.warn('Meilisearch status:', h.meilisearch);
+    }
+  } catch (e) {
+    console.error('Health check failed:', e);
+    dom.dotServer.className = 'status-dot err';
+    dom.dotMeili.className  = 'status-dot unknown';
+  }
+}
+
+/* =============================================================
+   WORKSPACES
+   ============================================================= */
+async function loadWorkspaces() {
+  try {
+    const data = await api('/workspaces');
+    state.workspaces = data.workspaces || [];
+    console.log('Loaded workspaces:', state.workspaces);
+    
+    if (state.workspaces.length === 0) {
+      dom.workspaceSelect.innerHTML = '<option disabled selected>Create a workspace to begin</option>';
+      dom.workspaceSelect.disabled = true;
+      console.warn('No workspaces found. Create one via "+ Workspace" button.');
+    } else {
+      dom.workspaceSelect.disabled = false;
+      dom.workspaceSelect.innerHTML = state.workspaces
+        .map(w => `<option value="${escHtml(w.name)}">${escHtml(w.name)}</option>`)
+        .join('');
+      if (!state.workspace && state.workspaces.length > 0) {
+        state.workspace = state.workspaces[0].name;
+      }
+      if (state.workspace) dom.workspaceSelect.value = state.workspace;
+    }
+  } catch (e) {
+    console.error('loadWorkspaces failed:', e);
+    dom.workspaceSelect.innerHTML = '<option disabled selected>Error loading workspaces</option>';
+    dom.workspaceSelect.disabled = true;
+  }
+}
+
+dom.workspaceSelect.addEventListener('change', async () => {
+  state.workspace = dom.workspaceSelect.value;
+  state.sessionId = null;
+  state.sessionTokens = { query: 0, reply: 0 };
+  updateTokenDisplay();
+  await loadSessions();
+  clearDrawer();
+  dom.messages.innerHTML = '';
+});
+
+/* =============================================================
+   SESSIONS
+   ============================================================= */
+async function loadSessions() {
+  if (!state.workspace) return;
+  try {
+    const data = await api(`/sessions?workspace=${encodeURIComponent(state.workspace)}`);
+    state.sessions = data.sessions || [];
+    renderSessionList();
+  } catch (e) {
+    console.warn('loadSessions:', e);
+  }
+}
+
+function renderSessionList() {
+  dom.sessionList.innerHTML = '';
+  if (state.sessions.length === 0) {
+    dom.sessionList.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--text-muted)">No sessions yet.</div>';
+    return;
+  }
+  state.sessions.forEach(s => {
+    const el = document.createElement('div');
+    el.className = 'session-item' + (s.session_id === state.sessionId ? ' active' : '');
+    el.dataset.sid = s.session_id;
+    el.innerHTML = `
+      <div class="session-item-row">
+        <div class="session-item-title">${escHtml(s.title)}</div>
+        <button class="btn-delete-session" title="Delete session">✕</button>
+      </div>
+      <div class="session-item-meta">${fmtDate(s.updated_at)}</div>
+    `;
+    el.querySelector('.session-item-title').addEventListener('click', () => loadSession(s.session_id));
+    el.querySelector('.btn-delete-session').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Delete session "${s.title}"?`)) return;
+      try {
+        await api(`/sessions/${s.session_id}`, { method: 'DELETE' });
+        if (state.sessionId === s.session_id) {
+          state.sessionId = null;
+          dom.messages.innerHTML = '';
+          clearDrawer();
+          state.sessionTokens = { query: 0, reply: 0 };
+          updateTokenDisplay();
+        }
+        await loadSessions();
+      } catch (e) { alert('Delete failed: ' + e.message); }
+    });
+    // Parent click only fires when NOT clicking the title or delete button
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.btn-delete-session') || e.target.closest('.session-item-title')) return;
+      loadSession(s.session_id);
+    });
+    dom.sessionList.appendChild(el);
+  });
+}
+
+async function loadSession(sessionId) {
+  state.sessionId = sessionId;
+  state.sessionTokens = { query: 0, reply: 0 };
+  tokenDatapoints.length = 0;
+  dom.messages.innerHTML = '';
+  clearDrawer();
+  renderSessionList();
+  try {
+    const data = await api(`/sessions/${sessionId}/messages`);
+    (data.messages || []).forEach(m => appendMessage(m.role, m.content, {
+      time: m.created_at,
+      toolCalls: m.tool_calls,
+      thinking: m.thinking,
+    }));
+    const tok = await api(`/sessions/${sessionId}/tokens`);
+    state.sessionTokens = { query: tok.token_query, reply: tok.token_reply };
+    // Seed sparkline with one historical point so it shows something on reload
+    if ((tok.token_query + tok.token_reply) > 0) {
+      tokenDatapoints.push({ t: Date.now(), cumulative: tok.token_query + tok.token_reply });
+    }
+    updateTokenDisplay();
+    scrollBottom();
+  } catch (e) {
+    console.warn('loadSession:', e);
+  }
+}
+
+async function newChat() {
+  if (!state.workspace) return;
+  try {
+    const s = await api('/sessions', { method: 'POST', body: JSON.stringify({ workspace: state.workspace }) });
+    state.sessionId = s.session_id;
+    state.sessionTokens = { query: 0, reply: 0 };
+    tokenDatapoints.length = 0;
+    dom.messages.innerHTML = '';
+    clearDrawer();
+    updateTokenDisplay();
+    await loadSessions();
+    renderSessionList();
+  } catch (e) {
+    console.warn('newChat:', e);
+  }
+}
+
+$('btn-new-chat').addEventListener('click', newChat);
+

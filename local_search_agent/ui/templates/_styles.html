@@ -232,6 +232,7 @@ a:hover { text-decoration: underline; }
   transition: transform .22s cubic-bezier(.4,0,.2,1);
 }
 .preview-panel.hidden { transform: translateX(105%); }
+.preview-panel.maximized { width: 100vw; left: 0; }
 .preview-header {
   display: flex;
   align-items: flex-start;
@@ -270,6 +271,22 @@ a:hover { text-decoration: underline; }
 }
 .preview-close svg { width: 9px; height: 9px; }
 .preview-close:hover { color: var(--text-primary); border-color: var(--border-light); background: var(--bg-hover); }
+.preview-maximize {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: var(--transition);
+}
+.preview-maximize svg { width: 11px; height: 11px; }
+.preview-maximize:hover { color: var(--text-primary); border-color: var(--border-light); background: var(--bg-hover); }
 .preview-body {
   flex: 1;
   overflow-y: auto;
@@ -695,6 +712,162 @@ a:hover { text-decoration: underline; }
 }
 .lp-btn-icon-danger svg { width: 13px; height: 13px; stroke: currentColor; }
 .lp-btn-icon-danger:hover { background: var(--red-dim, rgba(239,68,68,0.12)); border-color: var(--red, #ef4444); }
+
+/* =========================================================
+   ZOOM PANEL (topbar)
+   ========================================================= */
+.zoom-panel {
+  position: fixed;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  z-index: 9999;
+  white-space: nowrap;
+}
+.zoom-panel.hidden { display: none; }
+.zoom-step {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.zoom-step:hover { border-color: var(--accent); color: var(--accent); }
+#zoom-slider {
+  width: 140px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+#zoom-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg-raised);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+#zoom-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg-raised);
+}
+
+/* =========================================================
+   EXPORT (Markdown / Word dropdown + Print icon + per-table Excel)
+   ========================================================= */
+.export-row { display: flex; gap: 6px; }
+.lp-btn-icon {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.lp-btn-icon svg { width: 13px; height: 13px; }
+.lp-btn-icon:hover { border-color: var(--border-light); color: var(--text-primary); background: var(--bg-hover); }
+
+.export-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+.export-menu.hidden { display: none; }
+.export-menu button {
+  text-align: left;
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.export-menu button:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.table-export-wrap { position: relative; }
+.table-export-btn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity var(--transition), color var(--transition), border-color var(--transition);
+  cursor: pointer;
+}
+.table-export-wrap:hover .table-export-btn { opacity: 1; }
+.table-export-btn:hover { color: var(--green); border-color: var(--green); }
+.table-export-btn svg { width: 11px; height: 11px; }
+
+/* =========================================================
+   PRINT — clean single-column export of the chat only.
+   No JS toggling needed: window.print() triggers this media
+   query automatically in WebView2 / WKWebView / WebKitGTK alike.
+   ========================================================= */
+@media print {
+  #topbar, #left-panel, #tool-drawer, #statusbar, #input-bar,
+  .preview-panel, #ingest-toast, .table-export-btn, .export-menu {
+    display: none !important;
+  }
+  #app { display: block; height: auto; }
+  #main { display: block; height: auto; overflow: visible; }
+  #chat-area { overflow: visible; height: auto; }
+  #messages { overflow: visible; height: auto; padding: 0; gap: 14px; }
+  html, body { overflow: visible !important; height: auto !important; background: #fff !important; color: #000 !important; }
+  .msg.assistant, .msg.user { max-width: 100% !important; width: 100% !important; align-items: stretch !important; page-break-inside: avoid; }
+  .msg-bubble {
+    background: #fff !important;
+    border: 1px solid #ccc !important;
+    color: #000 !important;
+    width: 100% !important;
+  }
+  .msg-bubble pre code, .msg-bubble code { background: #f3f3f3 !important; color: #000 !important; border-color: #ccc !important; }
+  .msg-bubble a { color: #1d4ed8 !important; }
+}
 
 /* =========================================================
    ADVANCED SETTINGS TAB

@@ -1,0 +1,125 @@
+<script>
+/* =============================================================
+   CONFIG
+   ============================================================= */
+const API = 'http://127.0.0.1:{{ port }}/api/ui';
+const MODEL_CONTEXT_LIMITS = {
+  'gemma-4-31b-it':        256000,
+  'gemma-4-26b-a4b-it':    256000,
+  'gemini-3.1-flash-lite': 256000,
+  'gpt-4o':                128000,
+  'gpt-4-turbo':           128000,
+  'claude-opus-4':         200000,
+  'claude-sonnet-4':       200000,
+};
+
+function getModelContextLimit(model) {
+  if (!model) return 0;
+  if (MODEL_CONTEXT_LIMITS[model] !== undefined) return MODEL_CONTEXT_LIMITS[model];
+  if (model.startsWith('gemma-'))    return 256000;
+  if (model.startsWith('gemini-'))   return 1000000;
+  if (model.startsWith('gpt-'))      return 128000;
+  if (model.startsWith('claude-'))   return 200000;
+  return 0;
+}
+
+/* =============================================================
+   STATE
+   ============================================================= */
+const state = {
+  workspace: null,
+  workspaces: [],
+  sessionId: null,
+  sessions: [],
+  drawerPinned: false,
+  streaming: false,
+  queryHistory: [],
+  historyIndex: -1,
+  sessionTokens: { query: 0, reply: 0 },
+  provider: 'google',
+  model: 'gemma-4-31b-it',
+  activeToolCards: {},
+  allAgentSearchQueries: [],  // Track all agent search queries for comprehensive highlighting
+};
+
+/* =============================================================
+   DOM REFS
+   ============================================================= */
+const $ = id => document.getElementById(id);
+const dom = {
+  messages:        $('messages'),
+  queryInput:      $('query-input'),
+  btnSend:         $('btn-send'),
+  drawerContent:   $('drawer-content'),
+  drawerEmpty:     $('drawer-empty'),
+  toolDrawer:      $('tool-drawer'),
+  sessionList:     $('session-list'),
+  workspaceSelect: $('workspace-select'),
+  providerSelect:  $('provider-select'),
+  modelInput:      $('model-input'),
+  tokenLabel:      $('token-label'),
+  tokenBar:        $('token-bar'),
+  dotServer:       $('dot-server'),
+  dotMeili:        $('dot-meili'),
+  agentMsg:        $('status-agent-msg'),
+};
+
+/* =============================================================
+   UTILITIES
+   ============================================================= */
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || res.statusText);
+  }
+  return res.json();
+}
+
+function fmtTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function renderMarkdown(text) {
+  const html = marked.parse(text, { breaks: true });
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+  return wrap.innerHTML;
+}
+
+function scrollBottom() {
+  dom.messages.scrollTop = dom.messages.scrollHeight;
+}
+
+function autoResizeTextarea() {
+  const ta = dom.queryInput;
+  if (!ta) return;
+  ta.style.height = 'auto';
+  const minH = 66; // 3 lines at 14px font, 1.5 line-height + padding
+  ta.style.height = Math.max(minH, Math.min(ta.scrollHeight, 150)) + 'px';
+}
+
+function toolColor(toolName) {
+  if (toolName.includes('search')) return 'search';
+  if (toolName.includes('fetch') || toolName.includes('read')) return 'fetch';
+  if (toolName.includes('graph') || toolName.includes('link')) return 'graph';
+  return 'search';
+}
+
+function _new_call_id() {
+  return Math.random().toString(36).substr(2, 9);
+}
+

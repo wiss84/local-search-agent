@@ -1,0 +1,195 @@
+/* =============================================================
+   MESSAGES
+   ============================================================= */
+function appendMessage(role, content, opts = {}) {
+  const el = document.createElement('div');
+  el.className = `msg ${role}`;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble' + (opts.error ? ' error-bubble' : '');
+
+  if (role === 'assistant' && !opts.error) {
+    bubble.innerHTML = renderMarkdown(content);
+    attachTableExportButtons(bubble);
+  } else {
+    bubble.textContent = content;
+  }
+
+  el.appendChild(bubble);
+
+  if (opts.time) {
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+    meta.textContent = fmtTime(opts.time);
+    el.appendChild(meta);
+  }
+
+  dom.messages.appendChild(el);
+  scrollBottom();
+  return el;
+}
+
+function appendTypingIndicator() {
+  const el = document.createElement('div');
+  el.className = 'msg assistant';
+  el.id = 'typing-indicator';
+  el.innerHTML = '<div class="msg-bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>';
+  dom.messages.appendChild(el);
+  scrollBottom();
+  return el;
+}
+
+/* =============================================================
+   PER-TABLE EXCEL EXPORT
+   Tables in assistant answers are real <table> elements (rendered by
+   marked.js). Attach a small floating export icon to each one so the
+   user can save just that table, not the whole chat.
+   ============================================================= */
+function attachTableExportButtons(container) {
+  container.querySelectorAll('table').forEach(table => {
+    if (table.dataset.exportAttached) return;
+    table.dataset.exportAttached = '1';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'table-export-wrap';
+    table.parentNode.insertBefore(wrap, table);
+    wrap.appendChild(table);
+
+    const btn = document.createElement('button');
+    btn.className = 'table-export-btn';
+    btn.title = 'Export table to Excel';
+    btn.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="1"/><line x1="2" y1="6.5" x2="14" y2="6.5"/><line x1="6.5" y1="2" x2="6.5" y2="14"/></svg>';
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try { await exportTableToExcel(table); }
+      catch (err) { alert('Export failed: ' + err.message); }
+    });
+    wrap.appendChild(btn);
+  });
+}
+
+async function exportTableToExcel(table) {
+  const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
+  const rows = Array.from(table.querySelectorAll('tbody tr')).map(tr =>
+    Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim())
+  );
+  if (!headers.length) { alert('Could not read this table.'); return; }
+
+  if (!(window.pywebview && window.pywebview.api)) {
+    alert('Excel export requires the desktop app (pywebview).');
+    return;
+  }
+  const folder = await window.pywebview.api.pick_folder();
+  if (!folder) return; // user cancelled
+
+  const filename = `table-${Date.now()}.xlsx`;
+  await api('/export-table-xlsx', {
+    method: 'POST',
+    body: JSON.stringify({ folder, filename, headers, rows }),
+  });
+}
+
+/* =============================================================
+   DRAWER
+   ============================================================= */
+function clearDrawer() {
+  dom.drawerContent.innerHTML = '';
+  dom.drawerContent.appendChild(dom.drawerEmpty);
+  dom.drawerEmpty.style.display = 'flex';
+  state.activeToolCards = {};
+}
+
+function addThinkingCard(text) {
+  dom.drawerEmpty.style.display = 'none';
+  const card = document.createElement('div');
+  card.className = 'thinking-card';  // collapsed by default
+  card.innerHTML = `
+    <div class="thinking-card-header">
+      <span class="thinking-icon">&#x1F9E0;</span>
+      <span>Thinking</span>
+      <span style="margin-left:auto;font-size:10px;color:var(--text-muted)">&#x25BC;</span>
+    </div>
+    <div class="thinking-card-body">
+      <div class="thinking-text">${escHtml(text)}</div>
+    </div>
+  `;
+  card.querySelector('.thinking-card-header').addEventListener('click', () => card.classList.toggle('open'));
+  dom.drawerContent.appendChild(card);  // append at bottom
+}
+
+function addToolStartCard(tool, input, callId) {
+  dom.drawerEmpty.style.display = 'none';
+  const color = toolColor(tool);
+  const card = document.createElement('div');
+  card.className = 'tool-card';  // collapsed by default
+  card.dataset.callId = callId;
+  card.innerHTML = `
+    <div class="tool-card-header">
+      <span class="tool-dot ${color}"></span>
+      <span class="tool-name">${escHtml(tool)}</span>
+      <span class="tool-spinner"></span>
+    </div>
+    <div class="tool-card-body">
+      <div class="tool-section-label">Input</div>
+      <div class="tool-json">${escHtml(JSON.stringify(input, null, 2))}</div>
+    </div>
+  `;
+  card.querySelector('.tool-card-header').addEventListener('click', () => card.classList.toggle('open'));
+  dom.drawerContent.appendChild(card);  // append at bottom
+  dom.drawerContent.scrollTop = dom.drawerContent.scrollHeight;
+  state.activeToolCards[callId] = card;
+}
+
+function updateToolEndCard(tool, output, durationMs, callId) {
+  const card = state.activeToolCards[callId];
+  if (!card) return;
+  const header = card.querySelector('.tool-card-header');
+  const spinner = header.querySelector('.tool-spinner');
+  if (spinner) {
+    const dur = document.createElement('span');
+    dur.className = 'tool-duration';
+    dur.textContent = `${durationMs}ms`;
+    header.replaceChild(dur, spinner);
+  }
+  const body = card.querySelector('.tool-card-body');
+  const outSection = document.createElement('div');
+  outSection.innerHTML = `
+    <div class="tool-section-label">Output</div>
+    <div class="tool-json">${escHtml(output)}</div>
+  `;
+  body.appendChild(outSection);
+}
+
+/* =============================================================
+   SOURCE EXTRACTION & LINK HANDLING
+   ============================================================= */
+
+/**
+ * Open a URL in the system default app.
+ * In pywebview, window.open() opens the OS browser/file handler.
+ */
+function openExternalUrl(url) {
+  try {
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.open_url) {
+      window.pywebview.api.open_url(url);
+    } else {
+      window.open(url, '_blank');
+    }
+  } catch { window.open(url, '_blank'); }
+}
+
+// Global click handler to intercept all <a> clicks inside the messages area
+document.addEventListener('click', e => {
+  const a = e.target.closest('a');
+  if (!a) return;
+  const href = a.getAttribute('href');
+  if (!href) return;
+  // Skip doc preview links — handled by the preview panel interceptors below
+  if (href.match(/\/text\/[a-f0-9]+/) || href.match(/\/docs\/[a-f0-9]+/)) return;
+  // Only intercept http/https and local file URLs
+  if (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('file://')) {
+    e.preventDefault();
+    openExternalUrl(href);
+  }
+});
+

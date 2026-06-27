@@ -1,0 +1,319 @@
+/* =============================================================
+   SETTINGS MODAL  —  unified 4-tab modal
+   ============================================================= */
+
+// Tab switching (all tabs live in #modal-settings)
+document.querySelectorAll('#modal-settings .settings-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('#modal-settings .settings-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('#modal-settings .settings-pane').forEach(p => p.classList.add('hidden'));
+    tab.classList.add('active');
+    $('settings-pane-' + tab.dataset.tab).classList.remove('hidden');
+  });
+});
+
+async function openSettings(tab) {
+  // Reset to first tab unless a specific one is requested
+  const targetTab = tab || 'keys';
+  document.querySelectorAll('#modal-settings .settings-tab').forEach(t => {
+    const isTarget = t.dataset.tab === targetTab;
+    t.classList.toggle('active', isTarget);
+  });
+  document.querySelectorAll('#modal-settings .settings-pane').forEach(p => p.classList.add('hidden'));
+  const targetPane = $('settings-pane-' + targetTab);
+  if (targetPane) targetPane.classList.remove('hidden');
+
+  // --- Tab 1: API Keys ---
+  ['google', 'openai', 'anthropic'].forEach(p => {
+    $('key-input-' + p).value = '';
+    setKeyStatus(p, '');
+  });
+  try {
+    const data = await api('/keys');
+    const keys = data.keys || {};
+    ['google', 'openai', 'anthropic'].forEach(provider => {
+      if (keys[provider]) {
+        setKeyStatus(provider, '✓ Key saved: ' + keys[provider], 'ok');
+        $('key-btn-delete-' + provider).classList.remove('hidden');
+      } else {
+        $('key-btn-delete-' + provider).classList.add('hidden');
+      }
+    });
+  } catch (e) { console.warn('Could not load keys:', e); }
+
+  try {
+    const ls = await api('/langsmith');
+    if (ls.configured) {
+      setKeyStatus('langsmith', '✓ Configured: ' + ls.api_key_masked + (ls.project ? ' / ' + ls.project : ''), 'ok');
+      $('btn-langsmith-delete').classList.remove('hidden');
+      $('langsmith-project').value = ls.project || '';
+    } else {
+      $('btn-langsmith-delete').classList.add('hidden');
+    }
+  } catch (e) { console.warn('Could not load LangSmith config:', e); }
+
+  // --- Tab 2: Semantic + Re-ranking ---
+  try {
+    const s = await api('/settings/semantic');
+    $('toggle-enable-semantic').checked        = !!s.enable_semantic;
+    $('toggle-enable-query-expansion').checked = !!s.enable_query_expansion;
+    const semProvider = s.semantic_provider || '';
+    $('sem-provider-select').value = semProvider;
+    _populateSemModelDropdown(semProvider, s.semantic_model || '');
+  } catch (e) { console.warn('Could not load semantic settings:', e); }
+
+  try {
+    const r = await api('/settings/reranking');
+    $('toggle-enable-reranking').checked = r.enable_reranking !== false;
+    $('rerank-multiplier-input').value = r.rerank_candidate_multiplier ?? 4;
+    $('rerank-multiplier-field').classList.toggle('hidden', !$('toggle-enable-reranking').checked);
+  } catch (e) { console.warn('Could not load re-ranking settings:', e); }
+
+  // --- Tab 3: Models ---
+  await loadModels();
+  renderModelList(_allModels);
+
+  // --- Tab 4: Advanced ---
+  await loadAdvancedSettings();
+
+  $('modal-settings').classList.remove('hidden');
+}
+
+function setKeyStatus(provider, msg, type = '') {
+  const el = $('key-status-' + provider);
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'key-status' + (type ? ' ' + type : '');
+}
+
+// Wire save buttons
+document.querySelectorAll('.key-btn-save').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const provider = btn.dataset.provider;
+    const input = $('key-input-' + provider);
+    const key = input.value.trim();
+    if (!key) { setKeyStatus(provider, 'Please enter a key.', 'err'); return; }
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      await api('/keys', { method: 'POST', body: JSON.stringify({ provider, key }) });
+      input.value = '';
+      // Reload masked version to confirm
+      const data = await api('/keys');
+      const masked = (data.keys || {})[provider] || '';
+      setKeyStatus(provider, '✓ Saved: ' + masked, 'ok');
+      $('key-btn-delete-' + provider).classList.remove('hidden');
+    } catch (e) {
+      setKeyStatus(provider, '✗ ' + (e.message || 'Failed'), 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save';
+    }
+  });
+});
+
+// Wire delete buttons — assign IDs so we can target them
+document.querySelectorAll('.key-btn-delete[data-provider]').forEach(btn => {
+  const provider = btn.dataset.provider;
+  btn.id = 'key-btn-delete-' + provider;
+  btn.addEventListener('click', async () => {
+    if (!confirm(`Remove saved ${provider} API key?`)) return;
+    try {
+      await api('/keys', { method: 'DELETE', body: JSON.stringify({ provider }) });
+      setKeyStatus(provider, '');
+      btn.classList.add('hidden');
+      $('key-input-' + provider).value = '';
+    } catch (e) {
+      setKeyStatus(provider, '✗ ' + (e.message || 'Failed'), 'err');
+    }
+  });
+});
+
+$('btn-settings').addEventListener('click', () => openSettings());
+$('btn-settings-close').addEventListener('click', () => $('modal-settings').classList.add('hidden'));
+
+// LangSmith save
+$('btn-langsmith-save').addEventListener('click', async () => {
+  const apiKey = $('langsmith-api-key').value.trim();
+  const project = $('langsmith-project').value.trim() || 'local-search-agent';
+  if (!apiKey) { setKeyStatus('langsmith', 'Please enter an API key.', 'err'); return; }
+  const btn = $('btn-langsmith-save');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    await api('/langsmith', { method: 'POST', body: JSON.stringify({ api_key: apiKey, project }) });
+    $('langsmith-api-key').value = '';
+    const ls = await api('/langsmith');
+    setKeyStatus('langsmith', '✓ Configured: ' + ls.api_key_masked + ' / ' + ls.project, 'ok');
+    $('btn-langsmith-delete').classList.remove('hidden');
+  } catch (e) {
+    setKeyStatus('langsmith', '✗ ' + (e.message || 'Failed'), 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+});
+
+// LangSmith delete
+$('btn-langsmith-delete').addEventListener('click', async () => {
+  if (!confirm('Remove LangSmith tracing config?')) return;
+  try {
+    await api('/langsmith', { method: 'DELETE' });
+    setKeyStatus('langsmith', '');
+    $('btn-langsmith-delete').classList.add('hidden');
+    $('langsmith-api-key').value = '';
+    $('langsmith-project').value = '';
+  } catch (e) {
+    setKeyStatus('langsmith', '✗ ' + (e.message || 'Failed'), 'err');
+  }
+});
+
+// Close on overlay click
+$('modal-settings').addEventListener('click', e => {
+  if (e.target === $('modal-settings')) $('modal-settings').classList.add('hidden');
+});
+
+/* Populate semantic model dropdown based on selected provider */
+function _populateSemModelDropdown(provider, currentModel) {
+  const sel = $('sem-model-select');
+  sel.innerHTML = '<option value="">Default</option>';
+  const models = provider ? (_allModels[provider] || []) : [];
+  models.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = m;
+    if (m === currentModel) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  if (!models.length && provider) {
+    const opt = document.createElement('option');
+    opt.disabled = true;
+    opt.textContent = 'No models — add via Model Manager';
+    sel.appendChild(opt);
+  }
+}
+
+$('sem-provider-select').addEventListener('change', () => {
+  _populateSemModelDropdown($('sem-provider-select').value, '');
+});
+
+/* Semantic + Re-ranking save */
+$('toggle-enable-reranking').addEventListener('change', () => {
+  $('rerank-multiplier-field').classList.toggle('hidden', !$('toggle-enable-reranking').checked);
+});
+
+$('btn-semantic-save').addEventListener('click', async () => {
+  const btn = $('btn-semantic-save');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    await api('/settings/semantic', {
+      method: 'POST',
+      body: JSON.stringify({
+        enable_semantic:        $('toggle-enable-semantic').checked,
+        enable_query_expansion: $('toggle-enable-query-expansion').checked,
+        semantic_provider:      $('sem-provider-select').value,
+        semantic_model:         $('sem-model-select').value,
+      }),
+    });
+    await api('/settings/reranking', {
+      method: 'POST',
+      body: JSON.stringify({
+        enable_reranking:            $('toggle-enable-reranking').checked,
+        rerank_candidate_multiplier: parseInt($('rerank-multiplier-input').value, 10) || 4,
+      }),
+    });
+    $('semantic-status').textContent = '✓ Saved';
+    $('semantic-status').className = 'key-status ok';
+    setTimeout(() => { $('semantic-status').textContent = ''; $('semantic-status').className = 'key-status'; }, 2500);
+  } catch (e) {
+    $('semantic-status').textContent = '✗ ' + (e.message || 'Failed');
+    $('semantic-status').className = 'key-status err';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+});
+
+/* =============================================================
+   ADVANCED SETTINGS TAB
+   ============================================================= */
+const ADV_KEYS = [
+  'CHUNK_MIN_CHARS', 'CHUNK_TARGET_CHARS', 'CHUNK_MAX_CHARS', 'CHUNK_OVERLAP_CHARS',
+  'TABLE_ROWS_PER_CHUNK',
+  'PDF_PAGES_PER_BATCH', 'PDF_SPLIT_THRESHOLD', 'PDF_FALLBACK_PAGES_PER_BATCH',
+  'DOCX_CHAR_SPLIT_THRESHOLD', 'TESSERACT_FALLBACK_MIN_CHARS',
+  'DEFAULT_TOP_K', 'DEFAULT_MAX_ITERATIONS', 'SNIPPET_CONTEXT_CHARS',
+];
+
+async function loadAdvancedSettings() {
+  try {
+    const data = await api('/settings/advanced');
+    const effective = data.effective || {};
+    const overrides = data.overrides || {};
+    ADV_KEYS.forEach(key => {
+      const input = $('adv-' + key);
+      const defLabel = $('adv-default-' + key);
+      if (!input) return;
+      const defVal = effective[key] ?? '';
+      if (defLabel) defLabel.textContent = '(default: ' + defVal + ')';
+      // If overridden, fill the input and mark it; otherwise leave blank
+      if (key in overrides) {
+        input.value = overrides[key];
+        input.classList.add('overridden');
+      } else {
+        input.value = '';
+        input.classList.remove('overridden');
+      }
+    });
+  } catch (e) { console.warn('Could not load advanced settings:', e); }
+}
+
+// Mark field amber when user edits it
+ADV_KEYS.forEach(key => {
+  const input = $('adv-' + key);
+  if (input) input.addEventListener('input', () => {
+    input.classList.toggle('overridden', input.value !== '');
+  });
+});
+
+$('btn-advanced-save').addEventListener('click', async () => {
+  const btn = $('btn-advanced-save');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const overrides = {};
+  ADV_KEYS.forEach(key => {
+    const input = $('adv-' + key);
+    if (input && input.value.trim() !== '') overrides[key] = input.value.trim();
+  });
+  try {
+    await api('/settings/advanced', { method: 'POST', body: JSON.stringify({ overrides }) });
+    $('advanced-status').textContent = '✓ Saved — takes effect on next ingest';
+    $('advanced-status').className = 'key-status ok';
+    setTimeout(() => { $('advanced-status').textContent = ''; $('advanced-status').className = 'key-status'; }, 3500);
+    await loadAdvancedSettings();
+  } catch (e) {
+    $('advanced-status').textContent = '✗ ' + (e.message || 'Failed');
+    $('advanced-status').className = 'key-status err';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+});
+
+$('btn-advanced-reset').addEventListener('click', async () => {
+  if (!confirm('Reset all Advanced settings to compiled-in defaults?')) return;
+  try {
+    await api('/settings/advanced', { method: 'DELETE' });
+    $('advanced-status').textContent = '✓ Reset to defaults';
+    $('advanced-status').className = 'key-status ok';
+    setTimeout(() => { $('advanced-status').textContent = ''; $('advanced-status').className = 'key-status'; }, 2500);
+    await loadAdvancedSettings();
+  } catch (e) {
+    $('advanced-status').textContent = '✗ ' + (e.message || 'Failed');
+    $('advanced-status').className = 'key-status err';
+  }
+});
+
+/* =============================================================
+   DOCS BUTTON
+   ============================================================= */
+$('btn-docs').addEventListener('click', () => {
+  const docsUrl = `http://127.0.0.1:{{ file_server_port }}/help/index.html`;
+  openExternalUrl(docsUrl);
+});
+

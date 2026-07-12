@@ -9,6 +9,9 @@ document.querySelectorAll('#modal-settings .settings-tab').forEach(tab => {
     document.querySelectorAll('#modal-settings .settings-pane').forEach(p => p.classList.add('hidden'));
     tab.classList.add('active');
     $('settings-pane-' + tab.dataset.tab).classList.remove('hidden');
+    // Access tab's grant/key tables need more horizontal room than the
+    // other tabs -- see .modal-wide in _styles.html.
+    document.querySelector('#modal-settings .modal').classList.toggle('modal-wide', tab.dataset.tab === 'access');
   });
 });
 
@@ -22,6 +25,7 @@ async function openSettings(tab) {
   document.querySelectorAll('#modal-settings .settings-pane').forEach(p => p.classList.add('hidden'));
   const targetPane = $('settings-pane-' + targetTab);
   if (targetPane) targetPane.classList.remove('hidden');
+  document.querySelector('#modal-settings .modal').classList.toggle('modal-wide', targetTab === 'access');
 
   // --- Tab 1: API Keys ---
   ['google', 'openai', 'anthropic'].forEach(p => {
@@ -72,9 +76,16 @@ async function openSettings(tab) {
   // --- Tab 3: Models ---
   await loadModels();
   renderModelList(_allModels);
+  await loadModelAccessSection();
+  await loadRateLimitsSection();
 
   // --- Tab 4: Advanced ---
   await loadAdvancedSettings();
+
+  // --- Tab 5: Access (multi-tenant RBAC only) ---
+  if (state.multiTenant) {
+    await loadAccessTab();
+  }
 
   $('modal-settings').classList.remove('hidden');
 }
@@ -313,7 +324,10 @@ $('btn-advanced-reset').addEventListener('click', async () => {
    DOCS BUTTON
    ============================================================= */
 $('btn-docs').addEventListener('click', () => {
-  const docsUrl = `http://127.0.0.1:{{ file_server_port }}/help/index.html`;
+  // Same reasoning as FILE_SERVER in _script_preview_tokens.html -- adapt
+  // to whatever host the dashboard page itself loaded from, don't hardcode
+  // 127.0.0.1.
+  const docsUrl = window.location.protocol + '//' + window.location.hostname + ':{{ file_server_port }}/help/index.html';
   openExternalUrl(docsUrl);
 });
 

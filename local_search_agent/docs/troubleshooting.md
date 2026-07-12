@@ -199,6 +199,65 @@ local-search ui
 
 ---
 
+## Multi-Tenant RBAC Issues
+
+See [Role-Based Access Control](role_based_access_control.md) for the full
+conceptual guide. These only apply if you've set `identity_provider` /
+passed `--multi-tenant` — single-user mode is unaffected by anything
+below.
+
+### "Authentication required" / redirected to the login page unexpectedly
+
+Usually means the session is no longer valid — it expired (2h idle / 24h
+hard cap), someone (a superadmin) revoked the API key it was created
+from, or the workspace grant behind it was revoked. Revoking a key
+force-logs-out any active session tied to that subject immediately, not
+just the key itself — the very next action redirects straight to login,
+the same as clicking Sign Out. Log in again with a valid key.
+
+### A button/action is greyed out or missing
+
+The frontend hides or disables controls the caller's current role can't
+use (`data-requires-role` for member/admin, a separate
+`data-requires-superadmin` for the stricter tier — workspace create/
+delete, force re-ingest, wipe & re-ingest, concurrency settings). This is
+a UX convenience, not the real boundary — the same restriction is
+enforced server-side regardless, so this isn't a bug to work around, it's
+accurately reflecting what that role is actually allowed to do. Check
+[Role-Based Access Control — Roles and grants](role_based_access_control.md#roles-and-grants)
+for exactly which tier a given action needs.
+
+### "The model X/Y is not allowed for your role"
+
+Model/Provider Access Control's allow-list has nothing granted for that
+role yet — a role with zero rows has access to **nothing**, fail-closed,
+the same as workspace access. A superadmin needs to grant at least one
+provider/model to `member` and `admin` via Settings → Model Manager →
+"Model access by role" (or `GET/POST /api/ui/models/access` directly)
+before anyone in that role can query at all. See [Role-Based Access
+Control — Model / Provider Access Control](role_based_access_control.md#model--provider-access-control).
+
+### A query seems stuck on "N requests ahead of you"
+
+A concurrency limit is configured for that provider (Settings → Model
+Manager → Concurrency, superadmin-only) and every slot is currently in
+use. This resolves on its own once a slot frees up; if it never clears
+within 120 seconds the request fails with a clear error instead of
+hanging forever. If this happens often, the configured limit is probably
+too low for actual demand — raise it via `local-search config
+set-concurrency` or the same Settings panel. See [Role-Based Access
+Control — Rate Limits & Concurrency](role_based_access_control.md#rate-limits--concurrency).
+
+### A plain admin can't create/delete a workspace, force re-ingest, or wipe & re-ingest
+
+These four actions are superadmin-only, not workspace-admin — this is
+intentional (see [Roles and grants](role_based_access_control.md#roles-and-grants)
+for why), not a bug. Ordinary incremental ingest stays available to any
+workspace admin; only the heavier/destructive variants and workspace
+provisioning moved to superadmin.
+
+---
+
 ## Logs and Diagnostics
 
 ### Enable debug logging

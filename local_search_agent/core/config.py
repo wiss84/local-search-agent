@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from local_search_agent.core.constants import (
     DEFAULT_HOST,
@@ -16,6 +16,9 @@ from local_search_agent.core.constants import (
     DEFAULT_MEILI_URL,
     DEFAULT_PORT,
 )
+
+if TYPE_CHECKING:
+    from local_search_agent.auth.identity import IdentityProvider
 
 
 def _default_top_k() -> int:
@@ -133,12 +136,12 @@ class SearchAgentConfig:
     # --- Persistence ---
     db_path: str = field(default_factory=_default_db_path)
 
-    # --- Phase 5: Semantic search ---
+    # --- Semantic search ---
     enable_semantic: bool = False
     enable_query_expansion: bool = False
     semantic_model: Optional[str] = None
 
-    # --- Phase 5: Access control ---
+    # --- Access control ---
     enable_access_control: bool = False
     ldap_server: Optional[str] = None
 
@@ -149,6 +152,30 @@ class SearchAgentConfig:
     # --- Re-ranking ---
     enable_reranking: bool = True
     rerank_candidate_multiplier: int = 4
+
+    # --- Multi-tenant RBAC (see docs/role_based_access_control.md) ---
+    # None (the default) = single-user mode, completely unchanged:
+    # AuthorizationMiddleware is never added to the app. Set this to any
+    # IdentityProvider implementation to opt into multi-tenant enforcement.
+    identity_provider: Optional["IdentityProvider"] = None
+
+    # cookie_secure=True (default) marks the APIKeyIdentityProvider browser
+    # session cookie Secure -- browsers then refuse to store or send it over
+    # anything but HTTPS, EXCEPT on localhost/127.0.0.1, which browsers treat
+    # as a secure context even over plain HTTP. That exception is why a
+    # single-machine `local-search ui --multi-tenant` test works out of the
+    # box, and why the exact same setup silently fails to log anyone in the
+    # moment `--host` is a real LAN IP instead: the login POST succeeds
+    # server-side (a session row really is created), but the browser drops
+    # the Set-Cookie header entirely, so every subsequent request looks
+    # unauthenticated again -- indistinguishable from "login did nothing"
+    # without knowing this mechanism exists. Set False only for a
+    # LAN-without-TLS deployment (e.g. `local-search ui --multi-tenant
+    # --insecure-cookies`) where you understand the session cookie will
+    # then be sent in cleartext over that network. Never set False for
+    # anything reachable from the open internet -- terminate real TLS (see
+    # docs/production-deployment.md's reverse-proxy section) instead.
+    cookie_secure: bool = True
 
     # ------------------------------------------------------------------
     # Post-init
@@ -215,8 +242,18 @@ class SearchAgentConfig:
     # ------------------------------------------------------------------
 
     def to_dict(self) -> dict:
-        d = asdict(self)
+        # asdict() deep-copies every field recursively. identity_provider may
+        # hold a non-deepcopy-safe object (e.g. threading.Lock inside AuthDB),
+        # so it must be excluded *before* asdict() runs, not popped after —
+        # popping after is too late, the deepcopy already blew up by then.
+        saved_provider = self.identity_provider
+        self.identity_provider = None
+        try:
+            d = asdict(self)
+        finally:
+            self.identity_provider = saved_provider
         d.pop("api_key", None)
+        d.pop("identity_provider", None)
         return d
 
     @classmethod

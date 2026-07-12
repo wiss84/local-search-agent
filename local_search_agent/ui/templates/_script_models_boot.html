@@ -1,45 +1,83 @@
 /* =============================================================
    MODEL DROPDOWN — load and repopulate on provider change
    ============================================================= */
-let _allModels = {};
+let _allModels = {};        // full configured set (Model Manager tab, semantic-model override)
+let _myAllowedModels = {};  // role-filtered set for THIS caller's own queries (Option B)
 
 async function loadModels() {
   try {
     const data = await api('/models');
     _allModels = data.models || {};
-    repopulateModelDropdown(state.provider);
   } catch (e) {
     console.warn('Could not load models:', e);
   }
 }
 
+// Model/Provider Access Control (Option B): the sidebar Provider/Model
+// selector is a PERSONAL per-query choice, not the shared deployment
+// default -- it's always populated from /models/allowed, which returns
+// the caller's current-role-for-this-workspace filtered list (or
+// everything, unfiltered, in single-user mode / for a superadmin -- see
+// api_routes.py's get_allowed_models docstring). Reload whenever the
+// workspace changes, since role is workspace-scoped (see
+// dom.workspaceSelect's change handler).
+async function loadAllowedModels() {
+  try {
+    const q = state.workspace ? `?workspace=${encodeURIComponent(state.workspace)}` : '';
+    const data = await api(`/models/allowed${q}`);
+    _myAllowedModels = data.models || {};
+  } catch (e) {
+    console.warn('Could not load allowed models:', e);
+    _myAllowedModels = {};
+  }
+  repopulateModelDropdown(state.provider);
+}
+
 function repopulateModelDropdown(provider) {
   const sel = dom.modelInput;
-  const models = _allModels[provider] || [];
+  const models = _myAllowedModels[provider] || [];
   const current = state.model;
   sel.innerHTML = models.map(m =>
     `<option value="${escHtml(m)}"${m === current ? ' selected' : ''}>${escHtml(m)}</option>`
   ).join('');
   if (models.length === 0) {
-    sel.innerHTML = '<option value="" disabled selected>No models — add via Settings</option>';
+    sel.innerHTML = state.multiTenant
+      ? '<option value="" disabled selected>No models allowed for your role</option>'
+      : '<option value="" disabled selected>No models — add via Settings</option>';
   } else if (!models.includes(current)) {
     state.model = models[0];
     sel.value = models[0];
-    api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.model', value: models[0] }) })
-      .catch(e => console.warn('Could not persist model change:', e));
+    // Single-user mode only: this dropdown still doubles as the shared
+    // deployment default there (see the change handlers below) -- in
+    // multi-tenant mode it's purely a per-query client-side choice, so
+    // there is nothing server-side to persist here.
+    if (!state.multiTenant) {
+      api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.model', value: models[0] }) })
+        .catch(e => console.warn('Could not persist model change:', e));
+    }
   }
 }
 
 dom.providerSelect.addEventListener('change', async () => {
   state.provider = dom.providerSelect.value;
   repopulateModelDropdown(state.provider);
-  await api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.provider', value: state.provider }) });
+  // Single-user mode: this dropdown IS the shared deployment default,
+  // exactly as before. Multi-tenant mode: purely a personal per-query
+  // choice (see loadAllowedModels() above) -- PATCH /api/ui/config is
+  // global_admin-scoped server-side and would 403 for a member anyway,
+  // and semantically a member's own choice for their own query should
+  // never silently become everyone else's default.
+  if (!state.multiTenant) {
+    await api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.provider', value: state.provider }) });
+  }
 });
 
 dom.modelInput.addEventListener('change', async () => {
   state.model = dom.modelInput.value;
   if (state.model) {
-    await api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.model', value: state.model }) });
+    if (!state.multiTenant) {
+      await api('/config', { method: 'PATCH', body: JSON.stringify({ key: 'global.model', value: state.model }) });
+    }
     updateTokenDisplay();
   }
 });
@@ -84,6 +122,7 @@ function renderModelList(models) {
         _allModels = data.models || _allModels;
         renderModelList(_allModels);
         repopulateModelDropdown(state.provider);
+        await loadModelAccessSection();
       } catch (e) {
         $('model-mgr-status').textContent = '✗ ' + (e.message || 'Failed');
         $('model-mgr-status').className = 'key-status err';
@@ -105,6 +144,7 @@ $('btn-model-add').addEventListener('click', async () => {
     $('model-mgr-name').value = '';
     renderModelList(_allModels);
     repopulateModelDropdown(state.provider);
+    await loadModelAccessSection();
     $('model-mgr-status').textContent = '✓ Added';
     $('model-mgr-status').className = 'key-status ok';
     setTimeout(() => { $('model-mgr-status').textContent = ''; $('model-mgr-status').className = 'key-status'; }, 2000);
@@ -113,6 +153,287 @@ $('btn-model-add').addEventListener('click', async () => {
     $('model-mgr-status').className = 'key-status err';
   }
 });
+
+/* =============================================================
+   MODEL ACCESS BY ROLE (Model/Provider Access Control, Option B)
+   admin-only management panel -- lives inside the Model Manager tab,
+   only rendered/shown when state.multiTenant is true (single-user mode
+   has no role concept and this section stays hidden, same pattern as
+   the Access tab itself -- see updateIdentityBar()).
+
+   Dropdown-based (role -> provider -> model, model dropdown filtered to
+   that provider's configured models, same pattern as the sidebar's
+   Provider/Model selector) rather than a checkbox grid of every model --
+   scales to however many models are configured, and any model added via
+   Model Manager above is immediately available here since both read
+   from the same _allModels.
+   ============================================================= */
+const MODEL_ACCESS_PROVIDERS = ['google', 'openai', 'anthropic', 'ollama'];
+let _modelAccessGranted = { member: {}, admin: {} };
+
+async function loadModelAccessSection() {
+  const section = $('model-access-section');
+  if (!section) return;
+  if (!state.multiTenant) {
+    section.classList.add('hidden');
+    return;
+  }
+  section.classList.remove('hidden');
+  try {
+    const access = await api('/models/access');
+    _modelAccessGranted = { member: access.member || {}, admin: access.admin || {} };
+    renderModelAccessRole('member');
+    renderModelAccessRole('admin');
+    _repopulateModelAccessModelSelect();
+  } catch (e) {
+    console.warn('Could not load model access:', e);
+  }
+}
+
+function _repopulateModelAccessModelSelect() {
+  const provider = $('model-access-provider-select').value;
+  const models = _allModels[provider] || [];
+  const sel = $('model-access-model-select');
+  sel.innerHTML = models.length
+    ? models.map(m => `<option value="${escHtml(m)}">${escHtml(m)}</option>`).join('')
+    : '<option value="" disabled selected>No models for this provider</option>';
+}
+
+if ($('model-access-provider-select')) {
+  $('model-access-provider-select').addEventListener('change', _repopulateModelAccessModelSelect);
+}
+
+if ($('btn-add-model-access')) {
+  $('btn-add-model-access').addEventListener('click', async () => {
+    const role = $('model-access-role-select').value;
+    const provider = $('model-access-provider-select').value;
+    const modelSel = $('model-access-model-select');
+    const modelName = modelSel.value;
+    if (!modelName) {
+      $('model-access-status').textContent = '✗ No model selected for this provider.';
+      $('model-access-status').className = 'key-status err';
+      return;
+    }
+    try {
+      await api('/models/access', {
+        method: 'POST',
+        body: JSON.stringify({ role, provider, model_name: modelName }),
+      });
+      $('model-access-status').textContent = `✓ Added ${provider}/${modelName} for ${role}.`;
+      $('model-access-status').className = 'key-status ok';
+      await loadModelAccessSection();
+    } catch (e) {
+      $('model-access-status').textContent = '✗ ' + (e.message || 'Failed');
+      $('model-access-status').className = 'key-status err';
+    }
+  });
+}
+
+function renderModelAccessRole(role) {
+  const container = $('model-access-list-' + role);
+  if (!container) return;
+  container.innerHTML = '';
+  const allowed = _modelAccessGranted[role] || {};
+  let any = false;
+  MODEL_ACCESS_PROVIDERS.forEach(provider => {
+    (allowed[provider] || []).forEach(model => {
+      any = true;
+      const row = document.createElement('div');
+      row.className = 'model-access-row';
+      row.innerHTML = `
+        <span style="flex:1">${escHtml(provider)} / ${escHtml(model)}</span>
+        <button class="lp-btn-icon" data-role="${escHtml(role)}" data-provider="${escHtml(provider)}" data-model="${escHtml(model)}">Remove</button>
+      `;
+      const btn = row.querySelector('button');
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await api('/models/access', {
+            method: 'DELETE',
+            body: JSON.stringify({ role, provider, model_name: model }),
+          });
+          await loadModelAccessSection();
+        } catch (e) {
+          alert('Failed to remove model access: ' + (e.message || e));
+          btn.disabled = false;
+        }
+      });
+      container.appendChild(row);
+    });
+  });
+  if (!any) {
+    container.innerHTML = `<div style="color:var(--text-muted);font-size:11px;padding:6px 0">No models granted to ${role} yet.</div>`;
+  }
+}
+
+/* =============================================================
+   RATE LIMITS & CONCURRENCY (07-concurrency-and-model-serving)
+   Two INDEPENDENTLY gated sub-sections -- see the HTML comment in
+   _modals.html for why they're not one section:
+     - Concurrency: multi-tenant + superadmin only, hidden entirely in
+       single-user mode.
+     - Quota overrides: visible+editable in either mode.
+   Both read/write a namespace-specific config keyed by mode (see
+   key_manager.py's rate_limits.json comment) so a single-user change and
+   a multi-tenant superadmin's change never collide.
+   ============================================================= */
+const RATE_LIMIT_PROVIDERS = ['google', 'openai', 'anthropic', 'ollama'];
+
+async function loadRateLimitsSection() {
+  const concurrencySection = $('concurrency-section');
+  const quotaSection = $('quota-section');
+  if (!concurrencySection && !quotaSection) return;
+
+  const concurrencyVisible = state.multiTenant && state.isSuperadmin;
+  const quotaVisible = !state.multiTenant || state.isSuperadmin;
+
+  if (concurrencySection) concurrencySection.classList.toggle('hidden', !concurrencyVisible);
+  if (quotaSection) quotaSection.classList.toggle('hidden', !quotaVisible);
+
+  if (!concurrencyVisible && !quotaVisible) return;
+
+  try {
+    const data = await api('/rate-limits');
+    if (concurrencyVisible) renderConcurrencyList(data.concurrency || {});
+    if (quotaVisible) renderQuotaOverrideList(data.quota_overrides || {});
+  } catch (e) {
+    console.warn('Could not load rate limits:', e);
+  }
+}
+
+function renderConcurrencyList(concurrency) {
+  const container = $('concurrency-list');
+  if (!container) return;
+  container.innerHTML = '';
+  RATE_LIMIT_PROVIDERS.forEach(provider => {
+    const row = document.createElement('div');
+    row.className = 'key-row';
+    row.style.gap = '8px';
+    const current = concurrency[provider];
+    row.innerHTML = `
+      <span class="key-provider-label" style="width:90px">${provider}</span>
+      <input type="number" min="1" class="adv-input concurrency-input" data-provider="${provider}"
+             value="${current != null ? current : ''}" placeholder="unbounded" style="width:90px">
+      <button class="lp-btn-icon" data-action="save-concurrency" data-provider="${provider}">Save</button>
+      ${current != null ? `<button class="lp-btn-icon" data-action="clear-concurrency" data-provider="${provider}">Clear</button>` : ''}
+    `;
+    container.appendChild(row);
+  });
+
+  container.querySelectorAll('[data-action="save-concurrency"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const provider = btn.dataset.provider;
+      const input = container.querySelector(`.concurrency-input[data-provider="${provider}"]`);
+      const limit = parseInt(input.value, 10);
+      if (!limit || limit < 1) {
+        $('rate-limits-status').textContent = '✗ Enter a limit of at least 1.';
+        $('rate-limits-status').className = 'key-status err';
+        return;
+      }
+      try {
+        await api('/rate-limits/concurrency', { method: 'POST', body: JSON.stringify({ provider, limit }) });
+        $('rate-limits-status').textContent = `✓ Concurrency for ${provider} set to ${limit}.`;
+        $('rate-limits-status').className = 'key-status ok';
+        await loadRateLimitsSection();
+      } catch (e) {
+        $('rate-limits-status').textContent = '✗ ' + (e.message || 'Failed');
+        $('rate-limits-status').className = 'key-status err';
+      }
+    });
+  });
+  container.querySelectorAll('[data-action="clear-concurrency"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const provider = btn.dataset.provider;
+      try {
+        await api('/rate-limits/concurrency', { method: 'DELETE', body: JSON.stringify({ provider }) });
+        await loadRateLimitsSection();
+      } catch (e) {
+        $('rate-limits-status').textContent = '✗ ' + (e.message || 'Failed');
+        $('rate-limits-status').className = 'key-status err';
+      }
+    });
+  });
+}
+
+function renderQuotaOverrideList(overrides) {
+  const container = $('quota-override-list');
+  if (!container) return;
+  container.innerHTML = '';
+  let any = false;
+  RATE_LIMIT_PROVIDERS.forEach(provider => {
+    const models = overrides[provider] || {};
+    Object.entries(models).forEach(([modelName, limits]) => {
+      any = true;
+      const parts = ['rpm', 'tpm', 'rpd']
+        .filter(k => limits[k] != null)
+        .map(k => `${k.toUpperCase()}=${limits[k]}`)
+        .join('  ');
+      const row = document.createElement('div');
+      row.className = 'key-row';
+      row.style.gap = '8px';
+      row.innerHTML = `
+        <span class="key-provider-label" style="width:90px">${escHtml(provider)}</span>
+        <span style="flex:1;font-family:var(--font-mono);font-size:12px">${escHtml(modelName)} — ${parts}</span>
+        <button class="lp-btn-icon" data-action="delete-quota" data-provider="${escHtml(provider)}" data-model="${escHtml(modelName)}">Remove</button>
+      `;
+      container.appendChild(row);
+    });
+  });
+  if (!any) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:11px;padding:6px 0">No overrides configured.</div>';
+  }
+  container.querySelectorAll('[data-action="delete-quota"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const { provider, model } = btn.dataset;
+      try {
+        await api('/rate-limits/quota', {
+          method: 'DELETE',
+          body: JSON.stringify({ provider, model_name: model }),
+        });
+        await loadRateLimitsSection();
+      } catch (e) {
+        $('rate-limits-status').textContent = '✗ ' + (e.message || 'Failed');
+        $('rate-limits-status').className = 'key-status err';
+      }
+    });
+  });
+}
+
+if ($('btn-add-quota-override')) {
+  $('btn-add-quota-override').addEventListener('click', async () => {
+    const provider = $('quota-provider-select').value;
+    const modelName = $('quota-model-name').value.trim();
+    const rpm = $('quota-rpm').value ? parseInt($('quota-rpm').value, 10) : null;
+    const tpm = $('quota-tpm').value ? parseInt($('quota-tpm').value, 10) : null;
+    const rpd = $('quota-rpd').value ? parseInt($('quota-rpd').value, 10) : null;
+    if (!modelName) {
+      $('rate-limits-status').textContent = '✗ Enter a model name.';
+      $('rate-limits-status').className = 'key-status err';
+      return;
+    }
+    if (rpm === null && tpm === null && rpd === null) {
+      $('rate-limits-status').textContent = '✗ Enter at least one of RPM/TPM/RPD.';
+      $('rate-limits-status').className = 'key-status err';
+      return;
+    }
+    try {
+      await api('/rate-limits/quota', {
+        method: 'POST',
+        body: JSON.stringify({ provider, model_name: modelName, rpm, tpm, rpd }),
+      });
+      $('quota-model-name').value = '';
+      $('quota-rpm').value = '';
+      $('quota-tpm').value = '';
+      $('quota-rpd').value = '';
+      $('rate-limits-status').textContent = '✓ Override added.';
+      $('rate-limits-status').className = 'key-status ok';
+      await loadRateLimitsSection();
+    } catch (e) {
+      $('rate-limits-status').textContent = '✗ ' + (e.message || 'Failed');
+      $('rate-limits-status').className = 'key-status err';
+    }
+  });
+}
 
 /* =============================================================
    BOOT
@@ -129,6 +450,11 @@ async function boot() {
   dom.providerSelect.value = state.provider;
   await loadWorkspaces();
   console.log('✓ Workspaces loaded:', state.workspaces.length, 'workspaces');
+  await refreshRoleGating();
+  // Model/Provider Access Control (Option B): role-filtered, so this
+  // needs state.workspace already set (loadWorkspaces above) -- role is
+  // per-workspace, same reasoning as refreshRoleGating() itself.
+  await loadAllowedModels();
   if (state.workspace) {
     console.log('📂 Active workspace:', state.workspace);
     await loadSessions();

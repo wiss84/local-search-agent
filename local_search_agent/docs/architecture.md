@@ -59,12 +59,64 @@ FastAPI application serving documents via HTTP for agent access and human citati
 | Endpoint | Description |
 |----------|-------------|
 | `GET /health` | Liveness check |
+| `GET /health/ready` | Readiness check — also verifies Meilisearch is reachable |
 | `GET /health/indexes` | Index health summary |
 | `GET /workspaces` | List registered workspaces |
 | `GET /workspaces/{name}/docs` | List documents in workspace |
 | `GET /workspaces/{name}/history` | Sync history log |
 | `GET /text/{doc_id}` | Pre-cleaned Markdown text (agent-facing) |
 | `GET /docs/{doc_id}` | Raw original file (human citation link) |
+
+### 4b. Authorization Middleware (Multi-Tenant RBAC)
+
+Opt-in — only added to the FastAPI app when `config.identity_provider` is
+set (see [Configuration](configuration.md#multi-tenant-rbac) and
+[Role-Based Access Control](role_based_access_control.md) for the full
+guide). `None` (the default) means this section describes zero behavior
+change from single-user mode.
+
+```
+Request → IdentityProvider.resolve() → Identity | None
+              ↓
+     RoutePolicy lookup (method + path → required_role, scope)
+              ↓
+     AuthDB.get_role(subject, workspace) → role | None
+              ↓
+     role satisfies required_role?  →  proceed : 401/403
+```
+
+- **`auth/identity.py`** — `Identity` dataclass + `IdentityProvider`
+  protocol. Three built-in implementations: `HeaderIdentityProvider`
+  (trusts a header from an already-authenticating reverse proxy),
+  `APIKeyIdentityProvider` (argon2-hashed long-lived keys + short-lived
+  session cookies), `JWTIdentityProvider` (validates against a company
+  IdP's JWKS endpoint).
+- **`auth/route_policy.py`** — one declarative table
+  (`ROUTE_POLICIES: list[RoutePolicy]`) of which routes are protected and
+  what role/scope each needs, rather than per-endpoint decorators. Adding
+  RBAC to a new route means adding one table entry, not touching the
+  handler.
+- **`auth/authorization_middleware.py`** — `AuthorizationMiddleware`,
+  added to the FastAPI app only when `identity_provider` is set. Resolves
+  identity, looks up the matching `RoutePolicy`, checks the role via
+  `AuthDB`, and denies (401 no identity / 403 wrong role / 503 provider
+  itself unreachable) or lets the request through. Any route not listed
+  in `ROUTE_POLICIES` passes through unchecked — a documented gap, not a
+  silent one.
+- **`workspace/auth_db.py`** — `AuthDB`, the SQLite-backed store for
+  `workspace_members` (role grants), `api_keys`, and `activity_log`.
+- **New endpoints when RBAC is on**: `GET /api/ui/whoami` (role
+  introspection for frontend gating), `POST/DELETE /api/auth/login` /
+  `logout` (`APIKeyIdentityProvider` only), `GET/POST/DELETE
+  /api/admin/grants` and `/api/admin/keys` (global-admin-only management
+  APIs, with an additional superadmin-only restriction on granting/
+  revoking `admin` itself or managing another admin's key), `GET
+  /api/ui/models/allowed` and `GET/POST/DELETE /api/ui/models/access`
+  (Model/Provider Access Control, superadmin-only to manage), and `GET
+  /api/ui/rate-limits` + `/rate-limits/concurrency` + `/rate-limits/quota`
+  (concurrency/quota config, superadmin-only). See
+  [API Reference — Multi-Tenant RBAC](api-reference.md#multi-tenant-rbac)
+  for the full table.
 
 ### 5. Agent Loop (`agent/`)
 
@@ -81,7 +133,20 @@ START → call_llm → route → call_tools → call_llm → ... → END
 **Features:**
 - Multi-provider: Google, Ollama, OpenAI, Anthropic
 - `temperature=0` for deterministic responses
-- Rate limit handling + retry logic
+- Rate limiting, concurrency gating, and retry logic
+  (`agent/rate_limit_handler.py`) — one shared `RateLimitHandler` per
+  (provider, model, single-user/multi-tenant mode), not one per agent
+  instance, so multiple workspaces using the same provider+model track
+  RPM/TPM against the *same* real quota rather than each believing they
+  have the full budget. A `threading.Semaphore`-based concurrency gate
+  (not `asyncio`, since LLM calls run in a background worker thread) caps
+  simultaneous in-flight calls per provider; a caller forced to wait gets
+  a `queued` SSE event with position, and a fail-fast timeout (120s
+  default) rather than hanging indefinitely if a slot never frees.
+  RPM/TPM/RPD tracking is real (sliding-window, persisted daily count)
+  for Google always (auto-detected free tier) and for any other provider
+  once an admin configures an override — see
+  [Role-Based Access Control — Rate Limits & Concurrency](role_based_access_control.md#rate-limits--concurrency).
 - Max iteration guard
 - Both `query()` (blocking) and `stream()` (SSE) modes
 
@@ -118,6 +183,10 @@ Stores and resolves LLM provider API keys outside the project.
 - UI: **Set API Keys** button in the top bar
 - Values are masked when read back (first 6 + `***` + last 4)
 - Ollama always resolves to `None` — no key required
+- Also stores `models.json` (configured provider/model names) and
+  `rate_limits.json` (Rate Limits & Concurrency's concurrency caps and
+  RPM/TPM/RPD overrides — namespaced by single-user vs. multi-tenant
+  mode within that one file, see the RBAC guide's own section on why)
 
 ### 10. Semantic Layer (`semantic/`)
 

@@ -3,7 +3,7 @@ Production test suite for the ingestion chunker.
 
 Tests are organised around observable behaviours a real document could trigger,
 not around internal implementation details.  Every test uses document content
-that resembles actual user files: paragraph-separated prose, Markdown tables
+that resembles actual files: paragraph-separated prose, Markdown tables
 with header + separator + data rows, mixed reports, CSVs.
 
 Fixture helpers

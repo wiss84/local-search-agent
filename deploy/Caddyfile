@@ -1,0 +1,42 @@
+# Local Search Agent -- example Caddy reverse-proxy config.
+#
+# The app should never be directly internet-facing or terminate
+# TLS itself -- this is the thing that actually faces the network; both
+# local-search-agent.service (bound to 127.0.0.1:8000, see
+# deploy/systemd/) and the Docker option (published as
+# 127.0.0.1:8000 -> container) assume this proxy sits in front of them.
+#
+# Point this at an internal DNS name reachable via VPN/internal network,
+# not the public internet -- this is an employee tool, not a public
+# product.
+#
+# Install: https://caddyserver.com/docs/install
+# Run:     caddy run --config /etc/caddy/Caddyfile
+# (Caddy auto-provisions and renews TLS certs for the domain below via
+# ACME/Let's Encrypt -- no manual cert management needed.)
+
+search.acme-internal.com {
+    reverse_proxy localhost:8000
+
+    # Matches the framework's own upload/document-serving needs -- raise
+    # if your largest ingested source documents exceed this via a
+    # request body (this limit is about the HTTP request size, not
+    # ingestion itself, which reads files directly off disk and never
+    # goes through this proxy).
+    request_body {
+        max_size 50MB
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+    }
+
+    # Point your load balancer / uptime-monitoring healthcheck at
+    # /health/ready (readiness -- verifies Meilisearch is reachable, not
+    # just that the process is up; see server/fastapi_app.py's
+    # health_ready docstring). Point systemd's own restart-on-failure at
+    # plain /health instead (see the .service units in this directory) --
+    # that distinction is deliberate, not a typo between the two paths.
+}

@@ -4,7 +4,8 @@ FastAPI file server for the Local Search Agent framework.
 Endpoints
 ---------
 GET /health                      → liveness check
-GET /health/indexes              → index freshness summary (Phase 4)
+GET /health/ready                → readiness check (Meilisearch reachable?)
+GET /health/indexes              → index freshness summary
 GET /docs/{doc_id}               → serve the original raw file
 GET /text/{doc_id}               → serve pre-cleaned Markdown text
 GET /workspaces                  → list registered workspaces
@@ -20,7 +21,8 @@ import mimetypes
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+import httpx
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +32,27 @@ from local_search_agent.core.constants import __version__
 from local_search_agent.workspace.workspace_manager import WorkspaceManager
 
 logger = logging.getLogger(__name__)
+
+_HEALTH_READY_TIMEOUT_SECONDS = 2.0
+
+
+async def _check_meilisearch_reachable(
+    meilisearch_url: str, timeout: float = _HEALTH_READY_TIMEOUT_SECONDS
+) -> bool:
+    """
+    Return True if Meilisearch's own /health endpoint responds with
+    status="available" within `timeout` seconds. Used by GET /health/ready
+    (see its docstring for why this is a separate endpoint from GET /health).
+    Fails closed (False) on any error -- timeout, connection refused,
+    malformed JSON, unexpected status -- never raises out of here.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.get(f"{meilisearch_url.rstrip('/')}/health")
+            response.raise_for_status()
+            return response.json().get("status") == "available"
+    except Exception:
+        return False
 
 
 def build_app(
@@ -62,13 +85,55 @@ def build_app(
         )
         logger.info("Access control middleware enabled.")
 
+    auth_db = None
+    if config.identity_provider is not None:
+        from local_search_agent.auth.authorization_middleware import AuthorizationMiddleware
+        from local_search_agent.workspace.auth_db import AuthDB
+
+        auth_db = AuthDB(db_path=config.db_path)
+        app.add_middleware(
+            AuthorizationMiddleware,
+            config=config,
+            auth_db=auth_db,
+        )
+        logger.info("Authorization middleware enabled (multi-tenant RBAC).")
+
     app.state.config = config
     app.state.workspace_manager = workspace_manager
     app.state.metadata_db = metadata_db
+    app.state.auth_db = auth_db
 
     @app.get("/health", tags=["meta"])
     async def health() -> JSONResponse:
         return JSONResponse({"status": "ok", "version": __version__})
+
+    @app.get("/health/ready", tags=["meta"])
+    async def health_ready() -> JSONResponse:
+        """
+        Readiness check, deliberately separate from GET /health above.
+
+        See upcoming_features/06-production-deployment.md's "Health checks"
+        section: GET /health is a liveness probe ("is this process up at
+        all") that every existing deployment and test already depends on
+        returning 200 unconditionally once the process has started -- it
+        does not, and must not, depend on Meilisearch. GET /health/ready is
+        a readiness probe ("can this process actually serve a search right
+        now") that does check Meilisearch reachability, so an orchestrator
+        can hold a momentarily-Meilisearch-less-but-otherwise-fine process
+        out of the load balancer via readiness, without a liveness probe
+        killing and restarting it for the same transient reason. Point a
+        process supervisor's restart-on-failure at /health and a load
+        balancer's traffic-gating healthcheck at /health/ready.
+        """
+        meili_ok = await _check_meilisearch_reachable(config.meilisearch_url)
+        return JSONResponse(
+            {
+                "status": "ok" if meili_ok else "degraded",
+                "version": __version__,
+                "meilisearch": meili_ok,
+            },
+            status_code=200 if meili_ok else 503,
+        )
 
     @app.get("/health/indexes", tags=["meta"])
     async def health_indexes() -> JSONResponse:
@@ -83,8 +148,31 @@ def build_app(
         return JSONResponse(monitor.get_health_summary().to_dict())
 
     @app.get("/workspaces", tags=["meta"])
-    async def list_workspaces() -> JSONResponse:
-        return JSONResponse({"workspaces": workspace_manager.list_workspaces()})
+    async def list_workspaces(request: Request) -> JSONResponse:
+        workspaces = workspace_manager.list_workspaces()
+
+        # Multi-tenant mode: filter to workspaces the caller actually has a
+        # grant in. Same reasoning as the identical filter in
+        # ui/api_routes.py's own GET /api/ui/workspaces -- this route isn't
+        # (and structurally can't cleanly be) a route_policy.py entry, since
+        # RoutePolicy checks a single workspace's role, not "which of these
+        # many does the caller have any role in". AuthorizationMiddleware
+        # never touches this route, so identity is resolved directly here.
+        identity_provider = getattr(config, "identity_provider", None)
+        if identity_provider is not None:
+            try:
+                identity = identity_provider.resolve(request)
+            except Exception:
+                identity = None
+            if identity is None:
+                raise HTTPException(401, detail="Authentication required.")
+            if not identity.is_superadmin and auth_db is not None:
+                granted = {
+                    row["workspace"] for row in auth_db.list_access(subject=identity.subject)
+                }
+                workspaces = [ws for ws in workspaces if ws.get("name") in granted]
+
+        return JSONResponse({"workspaces": workspaces})
 
     @app.get("/workspaces/{workspace_name}/docs", tags=["meta"])
     async def list_workspace_docs(workspace_name: str) -> JSONResponse:
@@ -232,6 +320,8 @@ def _generate_docs_index(docs_dir: Path) -> None:
                 "ingestion.md",
                 "semantic-search.md",
                 "multi-workspace.md",
+                "role_based_access_control.md",
+                "production-deployment.md",
             ],
         ),
         (

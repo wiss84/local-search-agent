@@ -19,6 +19,7 @@ Tests cover:
 
 from __future__ import annotations
 
+import threading
 import time
 from unittest.mock import MagicMock, patch
 
@@ -185,36 +186,48 @@ class TestDebouncedHandler:
         from local_search_agent.scheduler.watch_mode import _DebouncedHandler
 
         calls = []
-        handler = _DebouncedHandler(
-            workspace="ws1", on_settle=lambda ws: calls.append(ws), debounce_seconds=0.05
-        )
+        fired = threading.Event()
+
+        def on_settle(ws):
+            calls.append(ws)
+            fired.set()
+
+        handler = _DebouncedHandler(workspace="ws1", on_settle=on_settle, debounce_seconds=0.1)
         handler.notify()
-        time.sleep(0.15)
+        assert fired.wait(timeout=1.0), "on_settle callback did not fire within timeout"
         assert calls == ["ws1"]
 
     def test_burst_of_notifies_collapses_to_one_call(self):
         from local_search_agent.scheduler.watch_mode import _DebouncedHandler
 
         calls = []
-        handler = _DebouncedHandler(
-            workspace="ws1", on_settle=lambda ws: calls.append(ws), debounce_seconds=0.05
-        )
+        fired = threading.Event()
+
+        def on_settle(ws):
+            calls.append(ws)
+            fired.set()
+
+        handler = _DebouncedHandler(workspace="ws1", on_settle=on_settle, debounce_seconds=0.1)
         for _ in range(10):
             handler.notify()
-            time.sleep(0.01)  # well within the debounce window, resets the timer each time
-        time.sleep(0.15)
+            time.sleep(0.01)
+        assert fired.wait(timeout=1.0), "on_settle callback did not fire within timeout"
         assert calls == ["ws1"]
 
     def test_cancel_prevents_fire(self):
         from local_search_agent.scheduler.watch_mode import _DebouncedHandler
 
         calls = []
-        handler = _DebouncedHandler(
-            workspace="ws1", on_settle=lambda ws: calls.append(ws), debounce_seconds=0.05
-        )
+        fired = threading.Event()
+
+        def on_settle(ws):
+            calls.append(ws)
+            fired.set()
+
+        handler = _DebouncedHandler(workspace="ws1", on_settle=on_settle, debounce_seconds=0.1)
         handler.notify()
         handler.cancel()
-        time.sleep(0.15)
+        assert not fired.wait(timeout=1.0), "on_settle callback fired after cancel"
         assert calls == []
 
     def test_exception_in_callback_is_caught(self):
@@ -223,9 +236,9 @@ class TestDebouncedHandler:
         def _boom(ws):
             raise RuntimeError("boom")
 
-        handler = _DebouncedHandler(workspace="ws1", on_settle=_boom, debounce_seconds=0.05)
+        handler = _DebouncedHandler(workspace="ws1", on_settle=_boom, debounce_seconds=0.1)
         handler.notify()
-        time.sleep(0.15)  # should not raise / crash the test process
+        time.sleep(0.4)  # should not raise / crash the test process
 
 
 # ---------------------------------------------------------------------------

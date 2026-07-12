@@ -175,6 +175,59 @@ See `config show` to verify the effective values and identify which are overridd
 
 
 
+### config set-concurrency / delete-concurrency
+
+Cap the max number of LLM calls for a provider allowed in flight at once, deployment-wide. For Ollama this is the framework-side mirror of Ollama's own `OLLAMA_NUM_PARALLEL` — set it based on your actual hardware's real capacity, since this framework can't introspect your VRAM itself. For cloud providers it's a burst control layered on top of (not instead of) any RPM/TPM override set via `set-rate-limit`. See [Role-Based Access Control — Rate Limits & Concurrency](role_based_access_control.md#rate-limits--concurrency) for the full concept.
+
+```bash
+local-search config set-concurrency --provider <provider> --limit <n> [--multi-tenant]
+local-search config delete-concurrency --provider <provider> [--multi-tenant]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--provider` | One of: `google`, `openai`, `anthropic`, `ollama` |
+| `--limit` | Max simultaneous in-flight LLM calls (integer ≥ 1) |
+| `--multi-tenant` | Edit the multi-tenant namespace instead of single-user's — these are completely independent settings, see below. |
+
+```bash
+local-search config set-concurrency --provider ollama --limit 2
+local-search config delete-concurrency --provider ollama
+```
+
+### config set-rate-limit / delete-rate-limit
+
+Set or remove an RPM/TPM/RPD override for a provider+model. Google gets auto-detected free-tier limits by default (overridable here); every other provider tracks nothing at all until you add an override — this is the only way OpenAI/Anthropic/Ollama get real quota tracking rather than blind retry-on-error.
+
+```bash
+local-search config set-rate-limit --provider <provider> --model-name <name> [--rpm <n>] [--tpm <n>] [--rpd <n>] [--multi-tenant]
+local-search config delete-rate-limit --provider <provider> --model-name <name> [--multi-tenant]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--provider` | One of: `google`, `openai`, `anthropic`, `ollama` |
+| `--model-name` | Model name this override applies to |
+| `--rpm` | Requests per minute |
+| `--tpm` | Tokens per minute |
+| `--rpd` | Requests per day |
+| `--multi-tenant` | Edit the multi-tenant namespace instead of single-user's. |
+
+At least one of `--rpm`/`--tpm`/`--rpd` is required. An omitted dimension means "don't track this", not "unlimited".
+
+```bash
+# A paid-tier OpenAI account with real, much-higher limits than the free tier
+local-search config set-rate-limit --provider openai --model-name gpt-5 --rpm 500 --tpm 2000000
+```
+
+### config show-rate-limits
+
+```bash
+local-search config show-rate-limits [--multi-tenant]
+```
+
+Shows every configured concurrency limit and quota override for the given mode's namespace (single-user by default; add `--multi-tenant` for that namespace instead — they're stored independently and never overwrite each other).
+
 ### config show
 
 ```bash
@@ -218,6 +271,8 @@ local-search ui [options]
 | `--meili-key` | `local_search_master_key` | Meilisearch master key. Also reads `MEILI_MASTER_KEY`. |
 | `--scheduler-interval` | `0` | Start ingestion scheduler with this interval in minutes. `0` = disabled. |
 | `--headless` | off | Run API server only, no window (for debugging). |
+| `--multi-tenant` | off | Enable multi-tenant RBAC (`APIKeyIdentityProvider`) against this same `--db`. Bootstrap keys/grants first with `auth create-key` and `grant-access` against the same `--db` path. See [Role-Based Access Control](role_based_access_control.md). |
+| `--insecure-cookies` | off | Allow the session cookie over plain HTTP. Needed only when `--host` is a real LAN IP rather than `127.0.0.1`/`localhost` — browsers treat only `localhost` as a secure context, so a `Secure` cookie is silently dropped on any other plain-HTTP address (login will appear to do nothing). Use only on a trusted local network; never for anything internet-facing. See [Role-Based Access Control's cookie note](role_based_access_control.md#a-note-on-testing-across-devices-on-a-lan). |
 
 ---
 
@@ -228,7 +283,7 @@ Manage workspaces (named collections of documents).
 ### workspace create
 
 ```bash
-local-search workspace create <name> <dir>
+local-search workspace create <name> <dir> [--multi-tenant]
 ```
 
 ```bash
@@ -236,6 +291,10 @@ local-search workspace create finance "C:\Shares\FinanceDocs"
 local-search workspace create hr ./hr_policies
 local-search --db D:\mydata\search.db workspace create finance "C:\Shares\FinanceDocs"
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--multi-tenant` | Also provision a scoped, member-level Meilisearch key for this workspace (see [Role-Based Access Control](role_based_access_control.md)). Only meaningful if you're running this framework in multi-tenant mode elsewhere against this same `--db`; the workspace is fully usable either way. |
 
 ### workspace list
 
@@ -246,12 +305,142 @@ local-search workspace list
 ### workspace delete
 
 ```bash
-local-search workspace delete <name> [--wipe]
+local-search workspace delete <name> [--wipe] [--multi-tenant]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--wipe` | Also delete all documents from the Meilisearch index. |
+| `--multi-tenant` | Also delete this workspace's scoped Meilisearch key, if one was provisioned via `workspace create --multi-tenant`. |
+
+---
+
+## grant-access
+
+Grant a subject a role across one or more workspaces, in a single atomic call — either every workspace gets the grant or none do. See [Role-Based Access Control](role_based_access_control.md) for the full concept walkthrough.
+
+```bash
+local-search grant-access --subject <email> --workspace <name> [<name> ...] --role <member|admin> [--granted-by <email>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--subject` | Stable identity being granted access, e.g. an email. |
+| `--workspace` | One or more workspace names (space-separated). |
+| `--role` | `member` or `admin`. |
+| `--granted-by` | Identity performing the grant, for audit purposes. Defaults to the current OS user. |
+
+```bash
+local-search grant-access --subject alice@acme.com --workspace finance --role admin
+local-search grant-access --subject bob@acme.com --workspace finance marketing --role member
+```
+
+---
+
+## revoke-access
+
+Revoke a subject's access to one or more workspaces, or all of it if `--workspace` is omitted.
+
+```bash
+local-search revoke-access --subject <email> [--workspace <name> ...]
+```
+
+```bash
+local-search revoke-access --subject bob@acme.com --workspace finance
+local-search revoke-access --subject bob@acme.com   # revokes everything
+```
+
+---
+
+## list-access
+
+List `workspace_members` grants, optionally filtered by subject and/or workspace (either, both, or neither).
+
+```bash
+local-search list-access [--subject <email>] [--workspace <name>]
+```
+
+```bash
+local-search list-access
+local-search list-access --workspace finance
+local-search list-access --subject alice@acme.com
+```
+
+---
+
+## grant-model-access / revoke-model-access / list-model-access
+
+Manage which provider+model combinations a role may use for their own
+queries — a cost control, not a workspace permission. Two flat
+allow-lists, one per role (`member`/`admin`), not per-person or
+per-workspace. A role with nothing granted has access to **nothing**
+(fail-closed) — grant at least one model to each role before anyone in
+that role tries to query. Superadmin always has access to every
+configured model and is unaffected by any of this. See [Role-Based
+Access Control — Model / Provider Access
+Control](role_based_access_control.md#model--provider-access-control)
+for the full concept.
+
+```bash
+local-search grant-model-access --role <member|admin> --provider <provider> --model-name <name> [--granted-by <email>]
+local-search revoke-model-access --role <member|admin> --provider <provider> --model-name <name>
+local-search list-model-access [--role <member|admin>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--role` | `member` or `admin`. |
+| `--provider` | One of: `google`, `openai`, `anthropic`, `ollama`. |
+| `--model-name` | Model name. |
+| `--granted-by` | Identity performing the grant, for audit purposes (`grant-model-access` only). Defaults to the current OS user. |
+
+```bash
+local-search grant-model-access --role member --provider google --model-name gemma-4-31b-it
+local-search grant-model-access --role admin --provider openai --model-name gpt-5
+local-search list-model-access
+local-search revoke-model-access --role member --provider google --model-name gemma-4-31b-it
+```
+
+---
+
+## auth
+
+Manage API keys for `APIKeyIdentityProvider` (see [Role-Based Access Control](role_based_access_control.md)). Not meaningful with `HeaderIdentityProvider` or `JWTIdentityProvider`, which never issue app-level keys.
+
+### auth create-key
+
+Generate a new API key for a subject. The raw key is shown exactly once — only its argon2 hash is persisted, so store it securely immediately; there is no way to retrieve it again later.
+
+```bash
+local-search auth create-key --subject <email> [--display-name <name>] [--superadmin] [--created-by <email>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--subject` | Stable identity, e.g. an email. |
+| `--display-name` | Human-readable name for UI display only. |
+| `--superadmin` | Mark this identity as a framework-level superadmin (rarely needed — most identities should use workspace grants instead). |
+| `--created-by` | Identity creating the key, for audit purposes. Defaults to the current OS user. |
+
+```bash
+local-search auth create-key --subject alice@acme.com --display-name "Alice"
+```
+
+### auth revoke-key
+
+```bash
+local-search auth revoke-key <key_id>
+```
+
+Revokes an API key by its `key_id` (see `auth list-keys` for key IDs). Revoking a key stops that specific credential from authenticating; it does not touch the subject's workspace grants — see the RBAC guide's note on why these are kept separate.
+
+### auth list-keys
+
+```bash
+local-search auth list-keys [--subject <email>]
+```
+
+Lists key metadata only (`key_id`, `subject`, `display_name`, status, `created_at`) — never the raw key or its hash.
 
 ---
 

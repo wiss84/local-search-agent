@@ -13,6 +13,14 @@
 pip install local-search-agent
 ```
 
+This installs everything needed for both single-user mode and optional
+[multi-tenant RBAC](role_based_access_control.md) — `argon2-cffi`
+(API-key hashing), `cryptography` (Meilisearch scoped-key encryption at
+rest), and `PyJWT[crypto]` (JWT validation) are core dependencies, not an
+extra you opt into separately. Nothing further to install even if you
+never turn RBAC on; these packages simply sit unused until you set
+`identity_provider` on `SearchAgentConfig`.
+
 ## First Run: Meilisearch Downloads Automatically
 
 On first use the framework downloads the Meilisearch binary for your platform and caches it in your user cache directory. This happens automatically — you don't need to do anything.

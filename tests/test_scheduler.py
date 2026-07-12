@@ -1,5 +1,5 @@
 """
-Unit tests for Phase 4: scheduler, monitor, and MetadataDB.
+Unit tests for scheduler, monitor, and MetadataDB.
 
 All APScheduler calls are mocked — no real timers or threads needed.
 Tests cover:

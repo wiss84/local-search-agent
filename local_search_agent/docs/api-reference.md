@@ -434,6 +434,7 @@ config = SearchAgentConfig(
 | `enrich_on_watch` | `bool` | `True` | Whether watch-triggered re-ingests also run semantic enrichment (if `enable_semantic=True`) |
 | `enable_reranking` | `bool` | `True` | Re-rank Meilisearch BM25 results with a local cross-encoder (flashrank) for better relevance. Fully offline. |
 | `rerank_candidate_multiplier` | `int` | `4` | Fetch `top_k × this many` candidates from Meilisearch before re-ranking down to `top_k`. Higher = better quality, more compute. |
+| `identity_provider` | `IdentityProvider \| None` | `None` | Opt into multi-tenant RBAC. `None` is single-user mode, unchanged. See [Multi-Tenant RBAC](#multi-tenant-rbac) above and [Role-Based Access Control](role_based_access_control.md). Excluded from `to_dict()`. |
 
 ### Methods
 
@@ -729,6 +730,206 @@ stale   = monitor.get_stale_workspaces() # -> list[WorkspaceHealth]
 ### WorkspaceHealth fields
 
 `workspace`, `status`, `doc_count`, `error_count`, `last_error`, `last_sync_at`, `next_sync_at`, `age_minutes`
+
+---
+
+## Multi-Tenant RBAC
+
+See [Role-Based Access Control](role_based_access_control.md) for the full
+conceptual guide (roles, choosing a provider, CLI walkthrough). This
+section covers the Python API surface only.
+
+### Identity and IdentityProvider
+
+```python
+from local_search_agent.auth.identity import Identity, IdentityProvider
+```
+
+`Identity` is a small dataclass: `subject: str`, `display_name: str = ""`,
+`is_superadmin: bool = False`. `IdentityProvider` is a `typing.Protocol`
+with one method, `resolve(request) -> Identity | None` — implement it to
+write a custom provider; return `None` for anyone you can't verify.
+
+### Built-in providers
+
+```python
+from local_search_agent.auth.header_provider import HeaderIdentityProvider
+from local_search_agent.auth.api_key_provider import APIKeyIdentityProvider
+from local_search_agent.auth.jwt_provider import JWTIdentityProvider
+```
+
+```python
+HeaderIdentityProvider(
+    header_name: str,
+    trusted_proxy_ips: list[str] | None = None,
+    display_name_header: str | None = None,
+    superadmin_header: str | None = None,
+)
+```
+Trusts a header set by an authenticating reverse proxy already in front
+of this app. No cryptography — exactly as trustworthy as whatever sets
+the header. See its module docstring for the full trust-boundary warning
+before using it.
+
+```python
+APIKeyIdentityProvider(auth_db: AuthDB)
+```
+Issues and validates `lsa_<key_id>_<secret>` API keys (argon2-hashed at
+rest) plus short-lived browser session cookies on top of them. Construct
+with a shared `AuthDB` instance (`from local_search_agent.workspace.auth_db import AuthDB`).
+
+```python
+JWTIdentityProvider(
+    issuer: str,
+    audience: str,
+    jwks_uri: str,
+    algorithms: list[str] | None = None,        # default ["RS256"]; "none" is a hard error
+    subject_claim: str = "sub",
+    display_name_claim: str | None = "name",
+    superadmin_claim: str | None = None,
+    jwks_cache_ttl_seconds: int = 600,
+    clock_skew_seconds: int = 60,
+)
+```
+Validates a bearer JWT against your IdP's JWKS endpoint (Auth0, Okta,
+Azure AD, Google Workspace, or any OIDC/OAuth2 issuer). Raises
+`ProviderUnavailableError` (from `local_search_agent.auth.errors`) if the
+JWKS endpoint itself is unreachable — a distinct failure mode from a
+simply-invalid token, which resolves to `None` instead. See its module
+docstring for the full algorithm-allow-list / clock-skew / JWKS-caching
+rationale.
+
+### Enabling it
+
+```python
+config.identity_provider = APIKeyIdentityProvider(AuthDB(db_path=config.db_path))
+```
+
+See [SearchAgentConfig's `identity_provider` field](#searchagentconfig)
+below — `None` (the default) is single-user mode, completely unchanged.
+
+### SearchAgentFramework methods
+
+```python
+framework.grant_workspace_access(
+    workspaces: list[str],
+    subject: str,
+    role: str,          # "member" | "admin"
+    granted_by: str,
+) -> None
+```
+Grant `subject` a role across one or more workspaces in a single atomic
+call — either every workspace gets the grant or none do.
+
+```python
+framework.revoke_workspace_access(subject: str, workspaces: list[str] | None = None) -> int
+```
+Revoke `subject`'s access. `workspaces=None` revokes everything for that
+subject. Returns the number of grants removed.
+
+```python
+framework.list_workspace_access(subject: str | None = None, workspace: str | None = None) -> list[dict]
+```
+List grants, optionally filtered by subject and/or workspace.
+
+```python
+framework.get_workspace_role(subject: str, workspace: str) -> str | None
+```
+Return `subject`'s role in `workspace`, or `None` if they have no grant
+(fail-closed — no grant means no access, not a default role).
+
+```python
+key_id, raw_key = framework.create_api_key(
+    subject: str,
+    created_by: str,
+    display_name: str = "",
+    is_superadmin: bool = False,
+) -> tuple[str, str]
+```
+Generate a new API key (`APIKeyIdentityProvider` mode). `raw_key` is
+returned exactly once — only its argon2 hash is persisted.
+
+```python
+framework.revoke_api_key(key_id: str) -> bool
+```
+Revoke an API key by its `key_id`. Returns `True` if an active key was
+found and revoked.
+
+```python
+framework.list_api_keys(subject: str | None = None) -> list[dict]
+```
+List key metadata only (never the raw key or its hash), optionally
+filtered by subject.
+
+### Model/Provider Access Control
+
+```python
+framework.grant_model_access(role: str, provider: str, model_name: str, granted_by: str) -> None
+framework.revoke_model_access(role: str, provider: str, model_name: str) -> bool
+framework.list_model_access(role: str | None = None) -> list[dict]
+```
+Manage which provider+model combinations a role (`"member"` or
+`"admin"`) may use for their own queries — a cost control, not a
+workspace permission. A role with nothing granted has access to nothing
+(fail-closed). See [Role-Based Access Control — Model / Provider Access
+Control](role_based_access_control.md#model--provider-access-control)
+for the full concept.
+
+### Rate Limits & Concurrency
+
+```python
+framework.set_concurrency_limit(provider: str, limit: int, multi_tenant: bool) -> None
+framework.delete_concurrency_limit(provider: str, multi_tenant: bool) -> bool
+framework.get_concurrency_limits(multi_tenant: bool) -> dict[str, int]
+
+framework.set_quota_override(
+    provider: str, model_name: str, multi_tenant: bool,
+    rpm: int | None = None, tpm: int | None = None, rpd: int | None = None,
+) -> None
+framework.delete_quota_override(provider: str, model_name: str, multi_tenant: bool) -> bool
+framework.get_quota_overrides(multi_tenant: bool, provider: str | None = None) -> dict
+```
+Manage the max simultaneous in-flight LLM calls per provider
+(concurrency) and RPM/TPM/RPD quota overrides per provider+model.
+`multi_tenant` selects which of two completely independent namespaces to
+read/write — pass `config.identity_provider is not None` for the natural
+default matching this framework instance's own mode, or an explicit
+value to manage the other namespace deliberately. Changes take effect on
+the next call for that provider (no restart needed). See [Role-Based
+Access Control — Rate Limits &
+Concurrency](role_based_access_control.md#rate-limits--concurrency) for
+the full concept, including why the two namespaces exist.
+
+**Example:**
+
+```python
+from local_search_agent import SearchAgentFramework, SearchAgentConfig
+from local_search_agent.auth.api_key_provider import APIKeyIdentityProvider
+from local_search_agent.workspace.auth_db import AuthDB
+
+config = SearchAgentConfig(workspace_name="finance", db_path="prod.db")
+config.identity_provider = APIKeyIdentityProvider(AuthDB(db_path=config.db_path))
+framework = SearchAgentFramework(config)
+
+key_id, raw_key = framework.create_api_key(subject="alice@acme.com", created_by="admin@acme.com")
+framework.grant_workspace_access(workspaces=["finance"], subject="alice@acme.com", role="admin", granted_by="admin@acme.com")
+
+print(framework.get_workspace_role("alice@acme.com", "finance"))  # "admin"
+```
+
+### HTTP endpoints (multi-tenant mode only)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/ui/whoami` | GET | Identity + role introspection for frontend role-gating. Always mounted; reports `multi_tenant: false` in single-user mode. |
+| `/api/auth/login` | POST | `APIKeyIdentityProvider` only — exchange a raw key for a session cookie. |
+| `/api/auth/logout` | POST | `APIKeyIdentityProvider` only — clear the session cookie. |
+| `/api/admin/grants` | GET / POST / DELETE | List / create / revoke workspace grants. Global admin only; granting/revoking `admin` itself requires superadmin. |
+| `/api/admin/keys` | GET / POST / DELETE | List / create / revoke API keys. `APIKeyIdentityProvider` only, global admin only; creating/revoking another admin's key requires superadmin. |
+| `/api/ui/models/allowed` | GET | Filtered provider/model list for the caller's current role. |
+| `/api/ui/models/access` | GET / POST / DELETE | Manage the two role-level model allow-lists. Superadmin only. |
+| `/api/ui/rate-limits`, `/rate-limits/concurrency`, `/rate-limits/quota` | GET / POST / DELETE | Concurrency + quota-override config for this deployment's own mode. Superadmin only. |
+| `/health/ready` | GET | Readiness probe — verifies Meilisearch is reachable, distinct from the plain liveness `/health`. Not RBAC-specific but shipped alongside it; see [Architecture](architecture.md). |
 
 ---
 

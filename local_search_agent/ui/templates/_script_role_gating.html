@@ -1,0 +1,114 @@
+/* =============================================================
+   ROLE GATING (multi-tenant RBAC — UX only, never the real boundary)
+   ============================================================= */
+// Real enforcement is always AuthorizationMiddleware server-side (see
+// local_search_agent/auth/authorization_middleware.py). This just avoids
+// showing a `member` a button that would 403 on click — see
+// upcoming_features/04-multi-tenant-rbac-mode.md, "Frontend role-gating".
+//
+// Single-user desktop mode (no identity_provider configured server-side):
+// /api/ui/whoami responds {multi_tenant: false}, and applyRoleGating()
+// becomes a permanent no-op — zero change to today's UI.
+//
+// Note: GET / already redirects to /login server-side when there's no
+// valid session cookie (see dashboard.py's serve_index), so a 401 from
+// whoami here means the session died *after* the page loaded (expired,
+// or logged out from another tab) — redirect client-side in that case too.
+
+const ROLE_RANK = { member: 0, admin: 1 };
+state.multiTenant = false;
+state.currentRole = null;
+state.subject = null;
+state.isSuperadmin = false;
+
+async function refreshRoleGating() {
+  try {
+    const q = state.workspace ? `?workspace=${encodeURIComponent(state.workspace)}` : '';
+    const who = await api(`/whoami${q}`);
+    state.multiTenant = !!who.multi_tenant;
+    state.currentRole = who.role || null;
+    state.subject = who.subject || null;
+    state.isSuperadmin = !!who.is_superadmin;
+  } catch (e) {
+    if (e.status === 401) {
+      window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+      return;
+    }
+    // Some other failure (network blip, 5xx) — fail closed in the UI too:
+    // treat as authenticated-but-no-role rather than silently leaving
+    // admin controls enabled.
+    console.warn('refreshRoleGating:', e);
+    state.multiTenant = true;
+    state.currentRole = null;
+    state.isSuperadmin = false;
+  }
+  applyRoleGating();
+  updateIdentityBar();
+}
+
+function applyRoleGating() {
+  if (!state.multiTenant) return; // single-user mode — never touch the UI
+  document.querySelectorAll('[data-requires-role]').forEach(el => {
+    const required = el.dataset.requiresRole;
+    const allowed = ROLE_RANK[state.currentRole] >= ROLE_RANK[required];
+    el.disabled = !allowed;
+    el.classList.toggle('role-disabled', !allowed);
+    if (allowed) {
+      if (el.dataset.titleDefault) el.title = el.dataset.titleDefault;
+    } else {
+      if (el.title && !el.dataset.titleDefault) el.dataset.titleDefault = el.title;
+      el.title = `Requires ${required} role`;
+    }
+  });
+  // Superadmin-only controls (workspace create/delete, force re-ingest,
+  // wipe & re-ingest) -- a separate, stricter tier from ROLE_RANK's
+  // member/admin, since state.currentRole reports "admin" for a
+  // superadmin too (see updateIdentityBar()'s own comment on why). These
+  // actions are gated server-side regardless -- this is UX only, same as
+  // every other [data-requires-role] toggle above.
+  document.querySelectorAll('[data-requires-superadmin]').forEach(el => {
+    const allowed = state.isSuperadmin;
+    el.disabled = !allowed;
+    el.classList.toggle('role-disabled', !allowed);
+    if (allowed) {
+      if (el.dataset.titleDefault) el.title = el.dataset.titleDefault;
+    } else {
+      if (el.title && !el.dataset.titleDefault) el.dataset.titleDefault = el.title;
+      el.title = 'Requires superadmin';
+    }
+  });
+}
+
+function updateIdentityBar() {
+  const subjectEl = document.getElementById('whoami-subject');
+  const logoutBtn = document.getElementById('btn-logout');
+  const accessTab = document.getElementById('settings-tab-access');
+  if (accessTab) accessTab.classList.toggle('hidden', !state.multiTenant);
+  if (!subjectEl || !logoutBtn) return;
+  if (state.multiTenant && state.subject) {
+    // Superadmin is not a value state.currentRole ever holds -- whoami
+    // reports role="admin" for a superadmin too (see whoami_route.py:
+    // role is a per-workspace concept, and a superadmin satisfies every
+    // workspace's admin check by bypassing it entirely, so "admin" is the
+    // correct value for ROLE_RANK gating purposes). The display label
+    // still needs to distinguish the two, so it's derived separately here
+    // from state.isSuperadmin rather than from state.currentRole itself --
+    // changing what currentRole holds would break applyRoleGating()'s
+    // rank comparison above.
+    const roleLabel = state.isSuperadmin ? 'superadmin' : state.currentRole;
+    subjectEl.textContent = state.subject + (roleLabel ? ` (${roleLabel})` : '');
+    subjectEl.style.display = '';
+    logoutBtn.style.display = '';
+  } else {
+    subjectEl.style.display = 'none';
+    logoutBtn.style.display = 'none';
+  }
+}
+
+document.getElementById('btn-logout')?.addEventListener('click', async () => {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } finally {
+    window.location.href = '/login';
+  }
+});

@@ -50,6 +50,20 @@ a:hover { text-decoration: underline; }
 ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 5px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+/* Generic utility class -- MUST exist for any bare class="... hidden"
+   element (e.g. #settings-tab-access, #access-new-key-reveal) to actually
+   disappear. Component-specific rules below (.modal-overlay.hidden,
+   .preview-panel.hidden, .settings-pane.hidden, #ingest-toast.hidden)
+   have higher specificity and still win where a custom hide animation
+   (e.g. the preview panel's slide-out transform) is intended instead of
+   a plain display:none -- this rule is purely the fallback for every
+   other element that has no such special-case override. Missing this
+   rule was the actual reason the Access tab kept showing in single-user
+   mode: the JS toggled the class correctly the whole time, but nothing
+   ever defined what "hidden" meant for a plain .settings-tab.
+*/
+.hidden { display: none; }
+
 /* =========================================================
    LAYOUT
    ========================================================= */
@@ -335,6 +349,10 @@ a:hover { text-decoration: underline; }
 .session-item-title { font-size: 11px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
 .session-item-meta { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
 .session-item-row { display: flex; align-items: center; gap: 4px; }
+.btn-rename-session { padding: 1px 4px; border-radius: 3px; font-size: 10px; color: var(--text-muted); border: 1px solid transparent; flex-shrink: 0; opacity: 0; transition: opacity var(--transition), color var(--transition); background: none; cursor: pointer; }
+.session-item:hover .btn-rename-session { opacity: 1; }
+.btn-rename-session:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.btn-rename-session svg { width: 10px; height: 10px; display: block; }
 .btn-delete-session { padding: 1px 4px; border-radius: 3px; font-size: 10px; color: var(--text-muted); border: 1px solid transparent; flex-shrink: 0; opacity: 0; transition: opacity var(--transition), color var(--transition); background: none; cursor: pointer; }
 .session-item:hover .btn-delete-session { opacity: 1; }
 .btn-delete-session:hover { color: var(--red); border-color: var(--red); background: var(--red-dim); }
@@ -492,6 +510,7 @@ a:hover { text-decoration: underline; }
    MODALS
    ========================================================= */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; animation: fadeIn 0.12s ease; }
+#modal-access-denied { z-index: 150; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .modal-overlay.hidden { display: none; }
 .modal { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 24px; min-width: 400px; max-width: 520px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.5); animation: slideUp 0.15s ease; }
@@ -562,11 +581,33 @@ a:hover { text-decoration: underline; }
   display: flex;
   flex-direction: column;
   max-height: 80vh;
+  /* Cancel the base .modal rule's own overflow-y:auto (see ".modal" above)
+     -- without this, BOTH the outer .modal and the inner .settings-pane
+     end up as competing overflow-y:auto containers in the same flex
+     column, and depending on how the renderer resolves that, the inner
+     pane's own scrollbar can simply never activate (content just gets
+     clipped past the modal's max-height with nothing to scroll it back
+     into view). Exactly one scroll container should exist here: the
+     .settings-pane below.
+  */
+  overflow: hidden;
+}
+/* The Access tab's grant/key tables have 5 columns of real content
+   (workspace, subject, role, granted-by, action) that get uncomfortably
+   cramped at the default modal width -- widen only when that tab is
+   active rather than blanket-widening every settings tab. */
+.modal-scrollable.modal-wide {
+  max-width: 760px;
 }
 .modal-scrollable .settings-pane {
   overflow-y: auto;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
+  /* Defensive hard cap, not just flex-shrink -- reserves roughly the
+     title + tab-bar + footer's combined height so this pane's own
+     scrollbar is guaranteed to engage rather than depending on every
+     ancestor in the flex chain shrinking correctly on every browser. */
+  max-height: calc(80vh - 132px);
 }
 .modal-footer {
   flex-shrink: 0;
@@ -696,6 +737,26 @@ a:hover { text-decoration: underline; }
   background: var(--red-dim);
 }
 
+/* Model access by role (Model/Provider Access Control) */
+.model-access-roles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.model-access-role-col { min-width: 0; }
+.model-access-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+.model-access-row:last-child { border-bottom: none; }
+.model-access-row input { flex-shrink: 0; }
+
 .lp-btn-icon-danger {
   flex-shrink: 0;
   width: 30px;
@@ -712,6 +773,25 @@ a:hover { text-decoration: underline; }
 }
 .lp-btn-icon-danger svg { width: 13px; height: 13px; stroke: currentColor; }
 .lp-btn-icon-danger:hover { background: var(--red-dim, rgba(239,68,68,0.12)); border-color: var(--red, #ef4444); }
+
+/* =========================================================
+   ROLE GATING (multi-tenant RBAC — UX only)
+   ========================================================= */
+.role-disabled { opacity: 0.35; cursor: not-allowed !important; pointer-events: none; }
+
+/* =========================================================
+   ADMIN ACCESS PANEL (multi-tenant RBAC)
+   ========================================================= */
+.access-table-wrap { overflow-y: auto; overflow-x: auto; height: 470px; border: 1px solid var(--border); border-radius: var(--radius); min-height: 150px; }
+.access-table-wrap .access-table { margin-top: 0; }
+.access-table-wrap thead th { position: sticky; top: 0; background: var(--bg-raised); z-index: 1; }
+.access-search { width: 100%; margin: 8px 0 4px; padding: 5px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-base); color: var(--text-primary); }
+.access-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+.access-table th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.access-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
+.access-table td.access-revoke-cell { text-align: right; }
+.access-table button.access-revoke-btn { background: none; border: 1px solid var(--red, #ef4444); color: var(--red, #ef4444); border-radius: 4px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
+.access-table button.access-revoke-btn:hover { background: var(--red-dim, rgba(239,68,68,0.12)); }
 
 /* =========================================================
    ZOOM PANEL (topbar)
@@ -916,6 +996,14 @@ a:hover { text-decoration: underline; }
 }
 .adv-input:focus { outline: none; border-color: var(--accent); }
 .adv-input::placeholder { color: var(--text-muted); }
+/* Chromium/WebView2's default number-input spin arrows are very faint
+   against a dark background and only become visible on hover -- which
+   reads as "there's no way to increment/decrement" until the user
+   happens to hover exactly over them. Force them always visible. */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 1;
+}
 /* highlight overridden field */
 .adv-input.overridden { border-color: var(--amber); }
 

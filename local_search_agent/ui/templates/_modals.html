@@ -110,6 +110,18 @@
   <span id="ingest-toast-msg">Ingesting…</span>
 </div>
 
+<!-- Access Denied dialog (multi-tenant RBAC) -->
+<div class="modal-overlay hidden modal-access-denied" id="modal-access-denied">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-title" style="color:var(--red)">Access Denied</div>
+    <p id="access-denied-message" style="font-size:13px;line-height:1.5;margin:8px 0"></p>
+    <p id="access-denied-contact" style="font-size:12px;color:var(--text-muted);margin:0 0 8px"></p>
+    <div class="modal-actions">
+      <button class="modal-btn primary" id="btn-access-denied-close">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════════════════════════════════════════
      UNIFIED SETTINGS MODAL  (4 tabs)
      1. API Keys
@@ -127,6 +139,7 @@
       <button class="settings-tab" data-tab="semantic">Semantic Search</button>
       <button class="settings-tab" data-tab="models">Model Manager</button>
       <button class="settings-tab" data-tab="advanced">Advanced</button>
+      <button class="settings-tab hidden" id="settings-tab-access" data-tab="access">Access</button>
       <button class="settings-tab" data-tab="about">About</button>
     </div>
 
@@ -305,6 +318,86 @@
 
       <!-- Model list per provider -->
       <div id="model-list-container"></div>
+
+      <!-- Model access by role (Model/Provider Access Control, Option B) --
+           multi-tenant only, hidden entirely in single-user mode (see
+           loadModelAccessSection() in _script_models_boot.html).
+           Dropdown-based (provider -> model, filtered to that provider's
+           configured models -- same pattern as the sidebar's Provider/
+           Model selector) rather than a checkbox grid of every model, so
+           this scales to however many models are configured without the
+           panel growing unbounded. Any model added via Model Manager
+           above is immediately available here (both read from the same
+           _allModels). -->
+      <div id="model-access-section" class="hidden" style="margin-top:20px">
+        <div class="adv-section-label">Model access by role</div>
+        <p class="settings-hint">Choose which of the models above each role may use for their own queries (see the Provider/Model selector in the sidebar). A role with nothing added here cannot query at all &mdash; superadmin always bypasses this and is never affected.</p>
+        <div class="key-row" style="margin-top:8px;gap:6px;flex-wrap:wrap">
+          <select id="model-access-role-select" class="lp-select" style="width:90px">
+            <option value="member">Member</option>
+            <option value="admin">Admin</option>
+          </select>
+          <select id="model-access-provider-select" class="lp-select" style="width:110px">
+            <option value="google">Google</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="ollama">Ollama</option>
+          </select>
+          <select id="model-access-model-select" class="lp-select" style="width:180px"></select>
+          <button id="btn-add-model-access" class="lp-btn-icon">Add</button>
+        </div>
+        <div id="model-access-status" class="key-status"></div>
+        <div class="model-access-roles" style="margin-top:12px">
+          <div class="model-access-role-col">
+            <div class="key-provider-label">Member</div>
+            <div id="model-access-list-member"></div>
+          </div>
+          <div class="model-access-role-col">
+            <div class="key-provider-label">Admin</div>
+            <div id="model-access-list-admin"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Rate limits & concurrency (07-concurrency-and-model-serving) --
+           two INDEPENDENTLY gated sub-sections, not one:
+           - Concurrency: multi-tenant + superadmin only, hidden entirely
+             in single-user mode -- a single-user desktop install has no
+             separate "deployment" to protect from itself, so there's
+             nothing for a deployment-wide concurrency cap to usefully do
+             there.
+           - Quota overrides: visible+editable in EITHER mode (single-user
+             benefits from real RPM/TPM tracking on a paid-tier account
+             just as much as a company would), but reads/writes a
+             namespace-specific config (see key_manager.py's rate_limits.json
+             comment) so a single-user change and a multi-tenant superadmin's
+           change for the same provider+model never collide or overwrite
+             each other. -->
+      <div id="concurrency-section" class="hidden" style="margin-top:20px">
+        <div class="adv-section-label">Concurrency (max simultaneous LLM calls)</div>
+        <p class="settings-hint">For Ollama, set this to whatever your own hardware actually supports (mirrors Ollama's own OLLAMA_NUM_PARALLEL) &mdash; this framework can't detect your VRAM. For cloud providers, this is a burst control on top of any RPM/TPM override below. Leave a provider unset for no cap.</p>
+        <div id="concurrency-list"></div>
+      </div>
+
+      <div id="quota-section" class="hidden" style="margin-top:20px">
+        <div class="adv-section-label">Quota overrides (RPM / TPM / RPD)</div>
+        <p class="settings-hint">Google gets auto-detected free-tier limits by default; every other provider tracks nothing until you add an override here. Set real numbers from your paid-tier account &mdash; leave a field blank to not track that dimension.</p>
+        <div id="quota-override-list"></div>
+        <div class="key-row" style="margin-top:8px;gap:6px;flex-wrap:wrap">
+          <select id="quota-provider-select" class="lp-select" style="width:110px">
+            <option value="google">Google</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="ollama">Ollama</option>
+          </select>
+          <input type="text" id="quota-model-name" class="adv-input" placeholder="model name" style="width:150px">
+          <input type="number" id="quota-rpm" class="adv-input" placeholder="RPM" style="width:70px">
+          <input type="number" id="quota-tpm" class="adv-input" placeholder="TPM" style="width:90px">
+          <input type="number" id="quota-rpd" class="adv-input" placeholder="RPD" style="width:70px">
+          <button id="btn-add-quota-override" class="lp-btn-icon">Add</button>
+        </div>
+        <div id="rate-limits-status" class="key-status"></div>
+      </div>
     </div>
 
     <!-- ── Tab 4: Advanced ── -->
@@ -392,6 +485,56 @@
         <button class="key-btn-save" id="btn-advanced-save">Save</button>
         <button class="modal-btn ghost" id="btn-advanced-reset" style="font-size:12px">Reset to Defaults</button>
         <span class="key-status" id="advanced-status"></span>
+      </div>
+    </div>
+
+    <!-- ── Tab 5 (multi-tenant RBAC — only shown when configured): Access ── -->
+    <div class="settings-pane hidden" id="settings-pane-access">
+      <p class="settings-hint">Manage who can access this deployment and what they can do. Real enforcement always happens server-side — this panel is a convenience over the same API the CLI uses. A key created here is always an ordinary credential — whether its holder acts as a workspace admin or member is entirely determined by the grants below, not by anything set at key-creation time. Framework-level superadmin status can only be granted via the CLI (<code>local-search auth create-key --superadmin</code>), never from this panel.</p>
+
+      <div class="adv-section-label">Grant / revoke workspace access</div>
+      <div class="key-row">
+        <div class="key-input-wrap" style="gap:8px;flex-wrap:wrap">
+          <input type="text" class="key-input" id="access-grant-subject" placeholder="email, e.g. alice@acme.com" autocomplete="off" style="flex:1;min-width:160px" />
+          <select class="key-input" id="access-grant-workspace" style="font-family:inherit;max-width:150px"></select>
+          <select class="key-input" id="access-grant-role" style="font-family:inherit;max-width:100px">
+            <option value="member">member</option>
+            <option value="admin">admin</option>
+          </select>
+          <button class="key-btn-save" id="btn-access-grant">Grant</button>
+        </div>
+        <span class="key-status" id="access-grant-status"></span>
+      </div>
+      <input type="text" class="access-search" id="access-grants-search" placeholder="Filter by email…" autocomplete="off" />
+      <div class="access-table-wrap">
+      <table class="access-table" id="access-grants-table">
+        <thead><tr><th>Workspace</th><th>Subject</th><th>Role</th><th>Granted by</th><th></th></tr></thead>
+        <tbody id="access-grants-tbody"></tbody>
+      </table>
+      </div>
+
+      <div class="adv-section-label" style="margin-top:16px">API keys</div>
+      <div class="key-row">
+        <div class="key-input-wrap" style="gap:8px;flex-wrap:wrap">
+          <input type="text" class="key-input" id="access-key-subject" placeholder="email, e.g. bob@acme.com" autocomplete="off" style="flex:1;min-width:160px" />
+          <input type="text" class="key-input" id="access-key-display-name" placeholder="display name (optional)" autocomplete="off" style="max-width:160px" />
+          <button class="key-btn-save" id="btn-access-create-key">Create key</button>
+        </div>
+        <span class="key-status" id="access-key-status"></span>
+      </div>
+      <div id="access-new-key-reveal" class="hidden" style="margin:8px 0;padding:10px;border:1px solid var(--accent);border-radius:var(--radius);background:var(--bg-raised)">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">This key will not be shown again — copy it now.</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <code id="access-new-key-value" style="flex:1;font-size:12px;word-break:break-all"></code>
+          <button class="modal-btn ghost" id="btn-access-copy-key" style="white-space:nowrap">Copy</button>
+        </div>
+      </div>
+      <input type="text" class="access-search" id="access-keys-search" placeholder="Filter by email…" autocomplete="off" />
+      <div class="access-table-wrap">
+      <table class="access-table" id="access-keys-table">
+        <thead><tr><th>Subject</th><th>Display name</th><th>Status</th><th>Created</th><th></th></tr></thead>
+        <tbody id="access-keys-tbody"></tbody>
+      </table>
       </div>
     </div>
 

@@ -597,3 +597,209 @@ def get_effective_constants() -> dict:
     overrides = _load_advanced()
     defaults.update(overrides)
     return defaults
+
+
+# ---------------------------------------------------------------------------
+# Rate limits & concurrency -- stored in rate_limits.json (separate from
+# settings.json since it's dict-of-dicts, same reasoning models.json is its
+# own file rather than living in the flat settings.json key space).
+#
+# Namespaced by mode ("single_user" vs "multi_tenant") within ONE file,
+# rather than sharing one flat namespace -- these are genuinely
+# independent settings surfaces, not the same setting seen two ways:
+# a person might run this framework single-user on their own laptop AND
+# separately run/test a multi-tenant deployment using the SAME OS user
+# account on the SAME machine (platformdirs' user_config_dir() is keyed
+# per-OS-user, not per app-mode) -- without this split, toggling
+# --multi-tenant on to test RBAC would silently read/overwrite the exact
+# same file a single-user setup already relies on, and vice versa. Every
+# get/set/delete function below takes an explicit multi_tenant: bool
+# rather than trying to auto-detect which one is "active" -- callers
+# already know their own mode (ui/api_routes.py has
+# app_state.config.identity_provider; agent/agent.py has config itself;
+# the CLI takes an explicit --multi-tenant flag) and guessing here would
+# just be a second, redundant place for that logic to drift out of sync.
+#
+# Two independent things live in each namespace, both fully admin-
+# configurable so a company running paid-tier models with much higher
+# limits than the free tier can set their own real numbers rather than
+# being stuck with the free-tier defaults auto-detected in
+# agent/rate_limit_handler.py:
+#
+#   concurrency      : { provider: max_simultaneous_llm_calls }
+#                       Caps how many LLM calls for that provider may be
+#                       in flight at once, deployment-wide. For Ollama
+#                       this is the framework-side mirror of
+#                       OLLAMA_NUM_PARALLEL -- the admin sets this based on
+#                       their own hardware's real capacity, this module has
+#                       no way to introspect VRAM itself. Absent = no cap
+#                       (today's behavior, unchanged until an admin opts
+#                       in by setting one). The UI only ever exposes this
+#                       in multi-tenant mode (superadmin-only) -- a
+#                       single-user desktop install has no separate
+#                       "deployment" to protect from itself, so there's
+#                       nothing for a concurrency cap to usefully do
+#                       there; the single_user namespace still exists
+#                       structurally for symmetry/completeness, it's just
+#                       never written to by the UI in that mode.
+#
+#   quota_overrides  : { provider: { model_name: {rpm, tpm, rpd} } }
+#                       Overrides agent/rate_limit_handler.py's
+#                       auto-detected Google free-tier limits, and is the
+#                       ONLY way non-Google providers get any RPM/TPM
+#                       tracking at all (they otherwise run in
+#                       retry-only mode with no quota tracking whatsoever
+#                       -- see that module's own docstring). Any of
+#                       rpm/tpm/rpd may be omitted; an omitted field means
+#                       "don't track this dimension" for that model, not
+#                       "unlimited" -- there is no such thing as tracking
+#                       toward an unlimited number. Unlike concurrency,
+#                       this stays visible and editable in single-user
+#                       mode too (a solo user on a paid-tier account
+#                       benefits from real RPM/TPM tracking just as much
+#                       as a company would).
+# ---------------------------------------------------------------------------
+
+_RATE_LIMIT_NAMESPACES = ("single_user", "multi_tenant")
+
+_RATE_LIMIT_DEFAULTS: dict = {
+    "concurrency": {},
+    "quota_overrides": {},
+}
+
+
+def _rate_limit_mode_key(multi_tenant: bool) -> str:
+    return "multi_tenant" if multi_tenant else "single_user"
+
+
+def _rate_limits_path() -> Path:
+    config_dir = Path(user_config_dir(_APP_NAME))
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir / "rate_limits.json"
+
+
+def _load_rate_limits_file() -> dict:
+    """Load the whole file (both namespaces), filling in any missing
+    namespace/keys with defaults."""
+    path = _rate_limits_path()
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            data = {}
+    else:
+        data = {}
+    for ns in _RATE_LIMIT_NAMESPACES:
+        if ns not in data or not isinstance(data[ns], dict):
+            data[ns] = {}
+        for key, default in _RATE_LIMIT_DEFAULTS.items():
+            if key not in data[ns] or not isinstance(data[ns][key], dict):
+                data[ns][key] = dict(default)
+    return data
+
+
+def _save_rate_limits_file(data: dict) -> None:
+    path = _rate_limits_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def get_concurrency_limits(multi_tenant: bool) -> dict[str, int]:
+    """Return {provider: max_simultaneous_llm_calls} for every provider
+    that has an explicit limit configured IN THIS MODE's namespace. A
+    provider absent from this dict has no concurrency cap at all."""
+    ns = _rate_limit_mode_key(multi_tenant)
+    return dict(_load_rate_limits_file()[ns]["concurrency"])
+
+
+def set_concurrency_limit(provider: str, limit: int, multi_tenant: bool) -> None:
+    """Set the max simultaneous in-flight LLM calls for a provider, in THIS MODE's namespace."""
+    if provider not in SUPPORTED_PROVIDERS:
+        raise ValueError(
+            f"Unknown provider {provider!r}. Supported: {', '.join(SUPPORTED_PROVIDERS)}"
+        )
+    limit = int(limit)
+    if limit < 1:
+        raise ValueError("Concurrency limit must be at least 1.")
+    data = _load_rate_limits_file()
+    ns = _rate_limit_mode_key(multi_tenant)
+    data[ns]["concurrency"][provider] = limit
+    _save_rate_limits_file(data)
+
+
+def delete_concurrency_limit(provider: str, multi_tenant: bool) -> bool:
+    """Remove a provider's concurrency cap in THIS MODE's namespace (reverts to unbounded). Returns True if one existed."""
+    data = _load_rate_limits_file()
+    ns = _rate_limit_mode_key(multi_tenant)
+    if provider not in data[ns]["concurrency"]:
+        return False
+    del data[ns]["concurrency"][provider]
+    _save_rate_limits_file(data)
+    return True
+
+
+def get_quota_overrides(multi_tenant: bool, provider: Optional[str] = None) -> dict:
+    """
+    Return configured RPM/TPM/RPD overrides from THIS MODE's namespace.
+    provider=None returns the full {provider: {model_name: {...}}} dict;
+    a specific provider returns just that provider's {model_name: {...}}.
+    """
+    ns = _rate_limit_mode_key(multi_tenant)
+    overrides = _load_rate_limits_file()[ns]["quota_overrides"]
+    if provider is not None:
+        return dict(overrides.get(provider, {}))
+    return {k: dict(v) for k, v in overrides.items()}
+
+
+def set_quota_override(
+    provider: str,
+    model_name: str,
+    multi_tenant: bool,
+    rpm: Optional[int] = None,
+    tpm: Optional[int] = None,
+    rpd: Optional[int] = None,
+) -> None:
+    """
+    Set (or replace) the RPM/TPM/RPD override for one provider+model, in
+    THIS MODE's namespace. At least one of rpm/tpm/rpd must be given. Any
+    omitted field means "don't track this dimension", not "unlimited" --
+    pass an explicit very-high number if that's genuinely the intent.
+    """
+    if provider not in SUPPORTED_PROVIDERS:
+        raise ValueError(
+            f"Unknown provider {provider!r}. Supported: {', '.join(SUPPORTED_PROVIDERS)}"
+        )
+    if not model_name.strip():
+        raise ValueError("Model name must not be empty.")
+    if rpm is None and tpm is None and rpd is None:
+        raise ValueError("At least one of rpm/tpm/rpd must be provided.")
+    entry: dict = {}
+    if rpm is not None:
+        entry["rpm"] = int(rpm)
+    if tpm is not None:
+        entry["tpm"] = int(tpm)
+    if rpd is not None:
+        entry["rpd"] = int(rpd)
+    data = _load_rate_limits_file()
+    ns = _rate_limit_mode_key(multi_tenant)
+    data[ns]["quota_overrides"].setdefault(provider, {})[model_name.strip()] = entry
+    _save_rate_limits_file(data)
+
+
+def delete_quota_override(provider: str, model_name: str, multi_tenant: bool) -> bool:
+    """Remove a provider+model's RPM/TPM/RPD override from THIS MODE's namespace. Returns True if one existed."""
+    data = _load_rate_limits_file()
+    ns = _rate_limit_mode_key(multi_tenant)
+    provider_overrides = data[ns]["quota_overrides"].get(provider, {})
+    if model_name not in provider_overrides:
+        return False
+    del provider_overrides[model_name]
+    _save_rate_limits_file(data)
+    return True
+
+
+def rate_limits_file_path() -> str:
+    """Return the path to the rate_limits.json file (for display purposes).
+    Both namespaces live in this one file -- see the module-level comment above."""
+    return str(_rate_limits_path())

@@ -321,6 +321,117 @@ def cmd_setup(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# config: concurrency & rate limits (07-concurrency-and-model-serving)
+# ---------------------------------------------------------------------------
+
+
+def cmd_config_set_concurrency(args: argparse.Namespace) -> None:
+    """Set the max simultaneous in-flight LLM calls for a provider."""
+    from local_search_agent.agent.rate_limit_handler import reset_shared_rate_limit_handlers
+    from local_search_agent.core.key_manager import rate_limits_file_path, set_concurrency_limit
+
+    try:
+        set_concurrency_limit(args.provider, args.limit, args.multi_tenant)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+    reset_shared_rate_limit_handlers()
+    mode = "multi-tenant" if args.multi_tenant else "single-user"
+    print(f"\u2713 Concurrency limit for '{args.provider}' set to {args.limit} ({mode} mode).")
+    print(f"  Stored at: {rate_limits_file_path()}")
+
+
+def cmd_config_delete_concurrency(args: argparse.Namespace) -> None:
+    """Remove a provider's concurrency cap (reverts to unbounded)."""
+    from local_search_agent.agent.rate_limit_handler import reset_shared_rate_limit_handlers
+    from local_search_agent.core.key_manager import delete_concurrency_limit
+
+    deleted = delete_concurrency_limit(args.provider, args.multi_tenant)
+    reset_shared_rate_limit_handlers()
+    mode = "multi-tenant" if args.multi_tenant else "single-user"
+    if deleted:
+        print(
+            f"\u2713 Concurrency limit for '{args.provider}' removed ({mode} mode, now unbounded)."
+        )
+    else:
+        print(f"No concurrency limit was set for '{args.provider}' ({mode} mode).")
+
+
+def cmd_config_set_rate_limit(args: argparse.Namespace) -> None:
+    """Set the RPM/TPM/RPD override for one provider+model."""
+    from local_search_agent.agent.rate_limit_handler import reset_shared_rate_limit_handlers
+    from local_search_agent.core.key_manager import rate_limits_file_path, set_quota_override
+
+    if args.rpm is None and args.tpm is None and args.rpd is None:
+        print("Provide at least one of --rpm, --tpm, --rpd.", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        set_quota_override(
+            args.provider,
+            args.model_name,
+            args.multi_tenant,
+            rpm=args.rpm,
+            tpm=args.tpm,
+            rpd=args.rpd,
+        )
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+    reset_shared_rate_limit_handlers()
+    mode = "multi-tenant" if args.multi_tenant else "single-user"
+    print(f"\u2713 Rate limit override set for '{args.provider}/{args.model_name}' ({mode} mode).")
+    print(f"  Stored at: {rate_limits_file_path()}")
+
+
+def cmd_config_delete_rate_limit(args: argparse.Namespace) -> None:
+    """Remove a provider+model's RPM/TPM/RPD override."""
+    from local_search_agent.agent.rate_limit_handler import reset_shared_rate_limit_handlers
+    from local_search_agent.core.key_manager import delete_quota_override
+
+    deleted = delete_quota_override(args.provider, args.model_name, args.multi_tenant)
+    reset_shared_rate_limit_handlers()
+    mode = "multi-tenant" if args.multi_tenant else "single-user"
+    if deleted:
+        print(
+            f"\u2713 Rate limit override for '{args.provider}/{args.model_name}' removed ({mode} mode)."
+        )
+    else:
+        print(
+            f"No rate limit override was set for '{args.provider}/{args.model_name}' ({mode} mode)."
+        )
+
+
+def cmd_config_show_rate_limits(args: argparse.Namespace) -> None:
+    """Show all configured concurrency limits and RPM/TPM/RPD overrides."""
+    from local_search_agent.core.key_manager import (
+        get_concurrency_limits,
+        get_quota_overrides,
+        rate_limits_file_path,
+    )
+
+    mode = "multi-tenant" if args.multi_tenant else "single-user"
+    print(f"Rate limits & concurrency -- {mode} mode ({rate_limits_file_path()}):")
+
+    concurrency = get_concurrency_limits(args.multi_tenant)
+    print("\n  Concurrency (max simultaneous LLM calls):")
+    if not concurrency:
+        print("    (none configured -- unbounded for every provider)")
+    for provider, limit in concurrency.items():
+        print(f"    {provider:<12} {limit}")
+
+    overrides = get_quota_overrides(args.multi_tenant)
+    print("\n  Quota overrides (RPM / TPM / RPD):")
+    if not overrides:
+        print("    (none configured -- Google uses auto-detected free-tier defaults; ")
+        print("     other providers run retry-only with no quota tracking)")
+    for provider, models in overrides.items():
+        for model_name, limits in models.items():
+            parts = [f"{k}={v}" for k, v in limits.items()]
+            print(f"    {provider}/{model_name:<25} {', '.join(parts)}")
+
+
+# ---------------------------------------------------------------------------
 # serve
 # ---------------------------------------------------------------------------
 
@@ -372,6 +483,30 @@ def cmd_workspace_create(args: argparse.Namespace) -> None:
     mdb.upsert_sync_job(workspace=args.name)
     print(f"Workspace {args.name!r} created -> {args.dir}")
 
+    if args.multi_tenant:
+        # Same non-fatal-by-design provisioning the UI's create_workspace
+        # route calls (see auth/meili_key_provisioning.py) -- a workspace
+        # is fully usable without a scoped key either way, so a failure
+        # here is printed but never turns workspace creation itself into
+        # an error.
+        from local_search_agent.auth.meili_key_provisioning import provision_workspace_keys
+        from local_search_agent.workspace.auth_db import AuthDB
+
+        auth_db = AuthDB(db_path=args.db)
+        key_uid = provision_workspace_keys(
+            workspace=args.name,
+            meilisearch_url=args.meili_url,
+            meili_master_key=args.meili_key,
+            auth_db=auth_db,
+        )
+        if key_uid:
+            print(f"✓ Scoped member-level Meilisearch key provisioned (uid={key_uid}).")
+        else:
+            print(
+                "⚠ Could not provision a scoped Meilisearch key (see logs). "
+                "Member-level requests will fall back to the master key until retried."
+            )
+
 
 def cmd_workspace_list(args: argparse.Namespace) -> None:
     from local_search_agent.core.config import SearchAgentConfig
@@ -393,10 +528,233 @@ def cmd_workspace_delete(args: argparse.Namespace) -> None:
     from local_search_agent.core.config import SearchAgentConfig
     from local_search_agent.core.framework import SearchAgentFramework
 
+    if args.multi_tenant:
+        from local_search_agent.auth.meili_key_provisioning import deprovision_workspace_keys
+        from local_search_agent.workspace.auth_db import AuthDB
+
+        auth_db = AuthDB(db_path=args.db)
+        deprovision_workspace_keys(
+            workspace=args.name,
+            meilisearch_url=args.meili_url,
+            meili_master_key=args.meili_key,
+            auth_db=auth_db,
+        )
+
     config = SearchAgentConfig(workspace_name=args.name, db_path=args.db)
     framework = SearchAgentFramework(config)
     framework.delete_workspace(name=args.name, wipe_index=args.wipe)
     print(f"Workspace {args.name!r} deleted" + (" (index wiped)." if args.wipe else "."))
+
+
+# ---------------------------------------------------------------------------
+# multi-tenant RBAC: grant-access / revoke-access / list-access
+# (see docs/role_based_access_control.md)
+# ---------------------------------------------------------------------------
+
+
+def cmd_grant_access(args: argparse.Namespace) -> None:
+    """Grant a subject a role across one or more workspaces (single atomic call)."""
+    import getpass
+
+    from local_search_agent.core.config import SearchAgentConfig
+    from local_search_agent.core.framework import SearchAgentFramework
+
+    config = SearchAgentConfig(workspace_name="default", db_path=args.db)
+    framework = SearchAgentFramework(config)
+    granted_by = args.granted_by or getpass.getuser()
+
+    try:
+        framework.grant_workspace_access(
+            workspaces=args.workspace,
+            subject=args.subject,
+            role=args.role,
+            granted_by=granted_by,
+        )
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    ws_list = ", ".join(args.workspace)
+    print(f"\u2713 Granted {args.subject!r} role={args.role!r} on workspace(s): {ws_list}")
+    print(f"  (granted_by={granted_by!r})")
+
+
+def cmd_revoke_access(args: argparse.Namespace) -> None:
+    """Revoke a subject's access to one or more workspaces, or all of it if --workspace is omitted."""
+    from local_search_agent.core.config import SearchAgentConfig
+    from local_search_agent.core.framework import SearchAgentFramework
+
+    config = SearchAgentConfig(workspace_name="default", db_path=args.db)
+    framework = SearchAgentFramework(config)
+    workspaces = args.workspace or None
+    deleted = framework.revoke_workspace_access(subject=args.subject, workspaces=workspaces)
+
+    if workspaces is None:
+        print(f"\u2713 Revoked all access for {args.subject!r} ({deleted} grant(s) removed).")
+    else:
+        ws_list = ", ".join(workspaces)
+        print(
+            f"\u2713 Revoked {args.subject!r} from workspace(s): {ws_list} ({deleted} grant(s) removed)."
+        )
+
+
+def cmd_list_access(args: argparse.Namespace) -> None:
+    """List grants, filtered by --subject and/or --workspace (either, both, or neither)."""
+    from local_search_agent.core.config import SearchAgentConfig
+    from local_search_agent.core.framework import SearchAgentFramework
+
+    config = SearchAgentConfig(workspace_name="default", db_path=args.db)
+    framework = SearchAgentFramework(config)
+    rows = framework.list_workspace_access(subject=args.subject, workspace=args.workspace)
+
+    if not rows:
+        print("No grants found.")
+        return
+
+    print(f"{'Workspace':<20} {'Subject':<30} {'Role':<10} {'Granted By':<20} {'Granted At'}")
+    print("-" * 100)
+    for row in rows:
+        print(
+            f"  {row['workspace']:<18} {row['subject']:<30} {row['role']:<10} "
+            f"{row['granted_by']:<20} {row['granted_at']}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Model / Provider Access Control: grant-model-access / revoke-model-access /
+# list-model-access (see docs/role_based_access_control.md)
+# ---------------------------------------------------------------------------
+
+
+def cmd_grant_model_access(args: argparse.Namespace) -> None:
+    """Grant a role permission to use a provider+model for their own queries."""
+    import getpass
+
+    from local_search_agent.core.config import SearchAgentConfig
+    from local_search_agent.core.framework import SearchAgentFramework
+
+    config = SearchAgentConfig(workspace_name="default", db_path=args.db)
+    framework = SearchAgentFramework(config)
+    granted_by = args.granted_by or getpass.getuser()
+
+    try:
+        framework.grant_model_access(
+            role=args.role,
+            provider=args.provider,
+            model_name=args.model_name,
+            granted_by=granted_by,
+        )
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"\u2713 Granted role={args.role!r} access to {args.provider}/{args.model_name}")
+    print(f"  (granted_by={granted_by!r})")
+
+
+def cmd_revoke_model_access(args: argparse.Namespace) -> None:
+    """Revoke a role's permission to use a provider+model."""
+    from local_search_agent.core.config import SearchAgentConfig
+    from local_search_agent.core.framework import SearchAgentFramework
+
+    config = SearchAgentConfig(workspace_name="default", db_path=args.db)
+    framework = SearchAgentFramework(config)
+    revoked = framework.revoke_model_access(
+        role=args.role, provider=args.provider, model_name=args.model_name
+    )
+    if revoked:
+        print(f"\u2713 Revoked role={args.role!r} access to {args.provider}/{args.model_name}")
+    else:
+        print(f"No grant found for role={args.role!r} on {args.provider}/{args.model_name}.")
+
+
+def cmd_list_model_access(args: argparse.Namespace) -> None:
+    """List model-access grants, optionally filtered by --role."""
+    from local_search_agent.core.config import SearchAgentConfig
+    from local_search_agent.core.framework import SearchAgentFramework
+
+    config = SearchAgentConfig(workspace_name="default", db_path=args.db)
+    framework = SearchAgentFramework(config)
+    rows = framework.list_model_access(role=args.role)
+
+    if not rows:
+        print("No model-access grants found.")
+        return
+
+    print(f"{'Role':<10} {'Provider':<12} {'Model':<30} {'Granted By':<20} {'Granted At'}")
+    print("-" * 100)
+    for row in rows:
+        print(
+            f"  {row['role']:<8} {row['provider']:<12} {row['model_name']:<30} "
+            f"{row['granted_by']:<20} {row['granted_at']}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# multi-tenant RBAC: auth create-key / revoke-key / list-keys
+# (APIKeyIdentityProvider -- see docs/role_based_access_control.md)
+# ---------------------------------------------------------------------------
+
+
+def cmd_auth_create_key(args: argparse.Namespace) -> None:
+    """Generate a new API key for a subject. The raw key is shown exactly once."""
+    import getpass
+
+    from local_search_agent.core.config import SearchAgentConfig
+    from local_search_agent.core.framework import SearchAgentFramework
+
+    config = SearchAgentConfig(workspace_name="default", db_path=args.db)
+    framework = SearchAgentFramework(config)
+    created_by = args.created_by or getpass.getuser()
+
+    key_id, raw_key = framework.create_api_key(
+        subject=args.subject,
+        created_by=created_by,
+        display_name=args.display_name or "",
+        is_superadmin=args.superadmin,
+    )
+    print(f"\u2713 API key created for {args.subject!r} (key_id={key_id})")
+    print()
+    print(f"  {raw_key}")
+    print()
+    print("  This key will not be shown again. Store it securely now.")
+
+
+def cmd_auth_revoke_key(args: argparse.Namespace) -> None:
+    """Revoke an API key by its key_id (see 'auth list-keys' for key_ids)."""
+    from local_search_agent.core.config import SearchAgentConfig
+    from local_search_agent.core.framework import SearchAgentFramework
+
+    config = SearchAgentConfig(workspace_name="default", db_path=args.db)
+    framework = SearchAgentFramework(config)
+    revoked = framework.revoke_api_key(args.key_id)
+    if revoked:
+        print(f"\u2713 API key {args.key_id!r} revoked.")
+    else:
+        print(f"No active key found with key_id {args.key_id!r}.")
+
+
+def cmd_auth_list_keys(args: argparse.Namespace) -> None:
+    """List API keys (metadata only -- never the raw key), optionally filtered by --subject."""
+    from local_search_agent.core.config import SearchAgentConfig
+    from local_search_agent.core.framework import SearchAgentFramework
+
+    config = SearchAgentConfig(workspace_name="default", db_path=args.db)
+    framework = SearchAgentFramework(config)
+    rows = framework.list_api_keys(subject=args.subject)
+
+    if not rows:
+        print("No API keys found.")
+        return
+
+    print(f"{'Key ID':<14} {'Subject':<30} {'Display Name':<20} {'Status':<10} {'Created At'}")
+    print("-" * 100)
+    for row in rows:
+        status = "revoked" if row["revoked_at"] else "active"
+        print(
+            f"  {row['key_id']:<12} {row['subject']:<30} {row['display_name']:<20} "
+            f"{status:<10} {row['created_at']}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -779,6 +1137,8 @@ def cmd_ui(args: argparse.Namespace) -> None:
         meili_key=args.meili_key,
         scheduler_interval=args.scheduler_interval,
         open_window=not args.headless,
+        multi_tenant=args.multi_tenant,
+        insecure_cookies=args.insecure_cookies,
     )
 
 
@@ -926,6 +1286,109 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_cfg_adv.set_defaults(func=cmd_config_set_advanced)
 
+    # set-concurrency / delete-concurrency / set-rate-limit / delete-rate-limit / show-rate-limits
+    p_cfg_concurrency = config_sub.add_parser(
+        "set-concurrency",
+        help="Set the max simultaneous in-flight LLM calls for a provider.",
+        description=(
+            "Cap how many LLM calls for a provider may be in flight at once, "
+            "deployment-wide. For Ollama this is the framework-side mirror of "
+            "OLLAMA_NUM_PARALLEL -- set it based on your actual hardware's real "
+            "capacity (this framework cannot introspect VRAM itself). For cloud "
+            "providers this is a burst control on top of (not instead of) any "
+            "RPM/TPM override set via set-rate-limit.\n\n"
+            "Example: local-search config set-concurrency --provider ollama --limit 2"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_cfg_concurrency.add_argument(
+        "--provider", required=True, choices=["google", "openai", "anthropic", "ollama"]
+    )
+    p_cfg_concurrency.add_argument(
+        "--limit", type=int, required=True, help="Max simultaneous in-flight LLM calls."
+    )
+    p_cfg_concurrency.add_argument(
+        "--multi-tenant",
+        action="store_true",
+        dest="multi_tenant",
+        help=(
+            "Edit the multi-tenant namespace instead of single-user. These are "
+            "completely independent settings (see rate_limits.json's own structure) "
+            "-- pass this if you're configuring a 'local-search ui --multi-tenant' "
+            "deployment; omit it for a single-user desktop install."
+        ),
+    )
+    p_cfg_concurrency.set_defaults(func=cmd_config_set_concurrency)
+
+    p_cfg_del_concurrency = config_sub.add_parser(
+        "delete-concurrency", help="Remove a provider's concurrency cap (reverts to unbounded)."
+    )
+    p_cfg_del_concurrency.add_argument(
+        "--provider", required=True, choices=["google", "openai", "anthropic", "ollama"]
+    )
+    p_cfg_del_concurrency.add_argument(
+        "--multi-tenant",
+        action="store_true",
+        dest="multi_tenant",
+        help="Edit the multi-tenant namespace instead of single-user.",
+    )
+    p_cfg_del_concurrency.set_defaults(func=cmd_config_delete_concurrency)
+
+    p_cfg_rate_limit = config_sub.add_parser(
+        "set-rate-limit",
+        help="Set an RPM/TPM/RPD override for a provider+model.",
+        description=(
+            "Override the auto-detected free-tier limits (Google) or add quota "
+            "tracking where there otherwise is none (OpenAI/Anthropic/Ollama) -- "
+            "use this for a paid-tier account with real, much-higher limits than "
+            "the free tier. At least one of --rpm/--tpm/--rpd is required; an "
+            "omitted dimension means 'don't track this', not 'unlimited'.\n\n"
+            "Example: local-search config set-rate-limit --provider google "
+            "--model-name gemini-3-flash --rpm 100 --tpm 2000000 --rpd 10000"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_cfg_rate_limit.add_argument(
+        "--provider", required=True, choices=["google", "openai", "anthropic", "ollama"]
+    )
+    p_cfg_rate_limit.add_argument("--model-name", required=True, dest="model_name")
+    p_cfg_rate_limit.add_argument("--rpm", type=int, default=None, help="Requests per minute.")
+    p_cfg_rate_limit.add_argument("--tpm", type=int, default=None, help="Tokens per minute.")
+    p_cfg_rate_limit.add_argument("--rpd", type=int, default=None, help="Requests per day.")
+    p_cfg_rate_limit.add_argument(
+        "--multi-tenant",
+        action="store_true",
+        dest="multi_tenant",
+        help="Edit the multi-tenant namespace instead of single-user.",
+    )
+    p_cfg_rate_limit.set_defaults(func=cmd_config_set_rate_limit)
+
+    p_cfg_del_rate_limit = config_sub.add_parser(
+        "delete-rate-limit", help="Remove a provider+model's RPM/TPM/RPD override."
+    )
+    p_cfg_del_rate_limit.add_argument(
+        "--provider", required=True, choices=["google", "openai", "anthropic", "ollama"]
+    )
+    p_cfg_del_rate_limit.add_argument("--model-name", required=True, dest="model_name")
+    p_cfg_del_rate_limit.add_argument(
+        "--multi-tenant",
+        action="store_true",
+        dest="multi_tenant",
+        help="Edit the multi-tenant namespace instead of single-user.",
+    )
+    p_cfg_del_rate_limit.set_defaults(func=cmd_config_delete_rate_limit)
+
+    p_cfg_show_rate_limits = config_sub.add_parser(
+        "show-rate-limits", help="Show all configured concurrency limits and RPM/TPM/RPD overrides."
+    )
+    p_cfg_show_rate_limits.add_argument(
+        "--multi-tenant",
+        action="store_true",
+        dest="multi_tenant",
+        help="Show the multi-tenant namespace instead of single-user.",
+    )
+    p_cfg_show_rate_limits.set_defaults(func=cmd_config_show_rate_limits)
+
     # -- setup ---------------------------------------------------------------
     p_setup = sub.add_parser(
         "setup",
@@ -966,6 +1429,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_ws_create = ws_sub.add_parser("create", help="Register a new workspace.")
     p_ws_create.add_argument("name")
     p_ws_create.add_argument("dir")
+    p_ws_create.add_argument(
+        "--meili-url", default=os.environ.get("MEILI_URL", "http://localhost:7700")
+    )
+    p_ws_create.add_argument(
+        "--meili-key", default=os.environ.get("MEILI_MASTER_KEY", "local_search_master_key")
+    )
+    p_ws_create.add_argument(
+        "--multi-tenant",
+        action="store_true",
+        dest="multi_tenant",
+        help=(
+            "Also provision a scoped, member-level Meilisearch key for this "
+            "Only meaningful if you're running this framework in "
+            "multi-tenant mode elsewhere (e.g. 'local-search ui --multi-tenant') "
+            "against this same --db; the workspace is fully usable either way."
+        ),
+    )
     p_ws_create.set_defaults(func=cmd_workspace_create)
 
     p_ws_list = ws_sub.add_parser("list", help="List registered workspaces.")
@@ -976,7 +1456,128 @@ def build_parser() -> argparse.ArgumentParser:
     p_ws_delete.add_argument(
         "--wipe", action="store_true", help="Also delete all documents from the Meilisearch index."
     )
+    p_ws_delete.add_argument(
+        "--meili-url", default=os.environ.get("MEILI_URL", "http://localhost:7700")
+    )
+    p_ws_delete.add_argument(
+        "--meili-key", default=os.environ.get("MEILI_MASTER_KEY", "local_search_master_key")
+    )
+    p_ws_delete.add_argument(
+        "--multi-tenant",
+        action="store_true",
+        dest="multi_tenant",
+        help="Also delete this workspace's scoped Meilisearch key (if one was provisioned via 'workspace create --multi-tenant').",
+    )
     p_ws_delete.set_defaults(func=cmd_workspace_delete)
+
+    # -- grant-access / revoke-access / list-access (multi-tenant RBAC) ------
+    p_grant = sub.add_parser(
+        "grant-access", help="Grant a subject a role across one or more workspaces."
+    )
+    p_grant.add_argument("--subject", required=True, help="Stable identity, e.g. an email.")
+    p_grant.add_argument(
+        "--workspace",
+        nargs="+",
+        required=True,
+        metavar="WORKSPACE",
+        help="One or more workspace names.",
+    )
+    p_grant.add_argument("--role", required=True, choices=["member", "admin"])
+    p_grant.add_argument(
+        "--granted-by",
+        default=None,
+        dest="granted_by",
+        help="Identity performing the grant, for audit purposes (default: current OS user).",
+    )
+    p_grant.set_defaults(func=cmd_grant_access)
+
+    p_revoke = sub.add_parser("revoke-access", help="Revoke a subject's workspace access.")
+    p_revoke.add_argument("--subject", required=True)
+    p_revoke.add_argument(
+        "--workspace",
+        nargs="*",
+        metavar="WORKSPACE",
+        help="Workspace(s) to revoke. Omit to revoke ALL of the subject's access.",
+    )
+    p_revoke.set_defaults(func=cmd_revoke_access)
+
+    p_list_access = sub.add_parser("list-access", help="List workspace access grants.")
+    p_list_access.add_argument("--subject", default=None, help="Filter by subject.")
+    p_list_access.add_argument("--workspace", default=None, help="Filter by workspace.")
+    p_list_access.set_defaults(func=cmd_list_access)
+
+    # -- grant-model-access / revoke-model-access / list-model-access --------
+    # (Model/Provider Access Control -- see docs/role_based_access_control.md)
+    p_grant_model = sub.add_parser(
+        "grant-model-access",
+        help="Grant a role permission to use a provider+model for their own queries.",
+        description=(
+            "A role with nothing granted has access to NOTHING -- fail-closed, same "
+            "as workspace access. Grant at least one model to each role before anyone "
+            "in that role tries to query.\n\n"
+            "Example: local-search grant-model-access --role member --provider google "
+            "--model-name gemma-4-31b-it"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_grant_model.add_argument("--role", required=True, choices=["member", "admin"])
+    p_grant_model.add_argument(
+        "--provider", required=True, choices=["google", "openai", "anthropic", "ollama"]
+    )
+    p_grant_model.add_argument("--model-name", required=True, dest="model_name")
+    p_grant_model.add_argument(
+        "--granted-by",
+        default=None,
+        dest="granted_by",
+        help="Identity performing the grant, for audit purposes (default: current OS user).",
+    )
+    p_grant_model.set_defaults(func=cmd_grant_model_access)
+
+    p_revoke_model = sub.add_parser(
+        "revoke-model-access", help="Revoke a role's permission to use a provider+model."
+    )
+    p_revoke_model.add_argument("--role", required=True, choices=["member", "admin"])
+    p_revoke_model.add_argument(
+        "--provider", required=True, choices=["google", "openai", "anthropic", "ollama"]
+    )
+    p_revoke_model.add_argument("--model-name", required=True, dest="model_name")
+    p_revoke_model.set_defaults(func=cmd_revoke_model_access)
+
+    p_list_model_access = sub.add_parser(
+        "list-model-access", help="List model-access grants (which roles may use which models)."
+    )
+    p_list_model_access.add_argument(
+        "--role", default=None, choices=["member", "admin"], help="Filter by role."
+    )
+    p_list_model_access.set_defaults(func=cmd_list_model_access)
+
+    # -- auth (API key management for APIKeyIdentityProvider) ----------------
+    p_auth = sub.add_parser("auth", help="Manage API keys (APIKeyIdentityProvider).")
+    auth_sub = p_auth.add_subparsers(dest="auth_command", required=True)
+
+    p_auth_create = auth_sub.add_parser("create-key", help="Generate a new API key for a subject.")
+    p_auth_create.add_argument("--subject", required=True, help="Stable identity, e.g. an email.")
+    p_auth_create.add_argument("--display-name", default=None, dest="display_name")
+    p_auth_create.add_argument(
+        "--superadmin",
+        action="store_true",
+        help="Mark this identity as a framework-level superadmin (rarely needed).",
+    )
+    p_auth_create.add_argument(
+        "--created-by",
+        default=None,
+        dest="created_by",
+        help="Identity creating the key, for audit purposes (default: current OS user).",
+    )
+    p_auth_create.set_defaults(func=cmd_auth_create_key)
+
+    p_auth_revoke = auth_sub.add_parser("revoke-key", help="Revoke an API key by its key_id.")
+    p_auth_revoke.add_argument("key_id")
+    p_auth_revoke.set_defaults(func=cmd_auth_revoke_key)
+
+    p_auth_list = auth_sub.add_parser("list-keys", help="List API keys (metadata only).")
+    p_auth_list.add_argument("--subject", default=None, help="Filter by subject.")
+    p_auth_list.set_defaults(func=cmd_auth_list_keys)
 
     # -- ingest --------------------------------------------------------------
     p_ingest = sub.add_parser("ingest", help="Ingest and index documents into Meilisearch.")
@@ -1127,6 +1728,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ui.add_argument(
         "--headless", action="store_true", help="Run API server only, no window (for debugging)."
+    )
+    p_ui.add_argument(
+        "--multi-tenant",
+        action="store_true",
+        dest="multi_tenant",
+        help=(
+            "Enable multi-tenant RBAC (APIKeyIdentityProvider) against this same --db. "
+            "Bootstrap keys/grants first with 'local-search auth create-key' and "
+            "'local-search grant-access' against the same --db path. "
+            "See docs/role_based_access_control.md."
+        ),
+    )
+    p_ui.add_argument(
+        "--insecure-cookies",
+        action="store_true",
+        dest="insecure_cookies",
+        help=(
+            "Allow the multi-tenant session cookie over plain HTTP -- needed when "
+            "--host is a real LAN IP rather than 127.0.0.1/localhost, since browsers "
+            "treat only localhost as a secure context and otherwise silently refuse "
+            "to store a Secure cookie over non-HTTPS (login will appear to silently "
+            "do nothing without this flag). Only use on a trusted local network "
+            "(e.g. testing across two laptops on the same home/office LAN); never "
+            "for anything internet-facing -- use a TLS reverse proxy instead, see "
+            "docs/production-deployment.md."
+        ),
     )
     p_ui.set_defaults(func=cmd_ui)
 

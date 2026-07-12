@@ -4,7 +4,12 @@
 <header id="topbar">
   <div id="logo">Local<span>Agent</span> Search Engine</div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
-    <button class="tb-btn" id="btn-settings" title="Settings">
+    <span id="whoami-subject" style="display:none;font-size:11px;color:var(--text-muted);margin-right:4px;font-family:var(--font-mono);"></span>
+    <button class="tb-btn" id="btn-logout" title="Sign out" style="display:none">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 14H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h3"/><path d="M11 11l3-3-3-3"/><line x1="14" y1="8" x2="6" y2="8"/></svg>
+      Sign out
+    </button>
+    <button class="tb-btn" id="btn-settings" title="Settings" data-requires-role="admin">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3.05 3.05l1.06 1.06M11.9 11.9l1.06 1.06M3.05 12.95l1.06-1.06M11.9 4.1l1.06-1.06"/></svg>
       Settings
     </button>

@@ -1,0 +1,34 @@
+# Keep the Docker build context small and avoid leaking local secrets/dev
+# artifacts into the image.
+
+.git
+.github
+.gitignore
+
+.mypy_cache
+.ruff_cache
+.pytest_cache
+__pycache__
+*.pyc
+
+# Local dev DB / logs / dumps -- never bake these into an image; the
+# container's own data lives in the mounted volume instead (see
+# Dockerfile's docstring / docs/production-deployment.md).
+tests/local_search_agent.db
+*.db
+dumps/
+logs.md
+ruff_logs.md
+test_logs.md
+rate_limit_state.json
+
+# Never ship real secrets in an image layer.
+.env
+*.env
+keys.json
+fernet.key
+
+# Docs/tests aren't needed inside the runtime image (pip install pulls the
+# published package instead of building from this source tree directly).
+docs/
+tests/

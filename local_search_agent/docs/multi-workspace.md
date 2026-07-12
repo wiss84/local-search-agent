@@ -241,6 +241,43 @@ All directories feed into the same Meilisearch index. Documents from different d
 
 ---
 
+## Access Control Across Workspaces
+
+Everything above describes single-user mode, where anyone who can reach
+the server can query and manage every workspace. If you're serving
+multiple employees or teams from one shared deployment, layer
+[multi-tenant RBAC](role_based_access_control.md) on top — it changes
+nothing about how workspaces themselves work (still one Meilisearch index
+per workspace, still fully isolated), it only adds a permission check in
+front of them.
+
+Access is granted per subject, per workspace, as `member` or `admin` —
+not globally. A subject can be `admin` in `finance` and have no access to
+`hr` at all:
+
+```bash
+local-search grant-access --subject alice@acme.com --workspace finance --role admin
+local-search grant-access --subject alice@acme.com --workspace marketing --role member
+# alice@acme.com has no grant for hr or legal — queries against those
+# workspaces are denied, not silently empty-results.
+```
+
+A few actions from the sections above become **admin-only** once RBAC is
+on, rather than available to anyone: `workspace create` and
+`workspace delete` are global-admin-only (see
+[Role-Based Access Control](role_based_access_control.md#concepts) for
+why these can't be scoped to "admin of my workspace only"), while
+ingesting/syncing an *existing* workspace (`ingest`, `watch start`,
+`scheduler start`) requires `admin` on that specific workspace. Querying
+a workspace (`query`, and the CLI walkthrough's read operations above)
+only requires `member`.
+
+This is entirely opt-in — set `identity_provider` on your config (or pass
+`--multi-tenant` to `local-search ui`) to turn it on; everything on this
+page works exactly as written if you never do.
+
+---
+
 ## Complete Multi-Workspace Example
 
 ```python

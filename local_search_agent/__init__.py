@@ -14,6 +14,20 @@ Phase 5: Semantic search (ConceptCompiler + StructuralParser + QueryExpander),
 """
 
 from local_search_agent.agent.agent import LocalSearchAgent
+from local_search_agent.auth.admin_keys_routes import build_admin_keys_router
+from local_search_agent.auth.api_key_provider import APIKeyIdentityProvider
+from local_search_agent.auth.authorization_middleware import AuthorizationMiddleware
+from local_search_agent.auth.errors import (
+    AuthError,
+    IdentityResolutionError,
+    InsufficientRoleError,
+    ProviderUnavailableError,
+    WorkspaceNotFoundError,
+)
+from local_search_agent.auth.grants_routes import build_grants_router
+from local_search_agent.auth.identity import Identity, IdentityProvider
+from local_search_agent.auth.session_routes import build_auth_router
+from local_search_agent.auth.whoami_route import build_whoami_router
 from local_search_agent.core.config import SearchAgentConfig
 from local_search_agent.core.document_node import DocumentNode
 from local_search_agent.core.framework import SearchAgentFramework
@@ -27,6 +41,7 @@ from local_search_agent.semantic.enricher import SemanticEnricher
 from local_search_agent.semantic.query_expander import QueryExpander
 from local_search_agent.semantic.structural_parser import StructuralMetadata, StructuralParser
 from local_search_agent.tools.search_tool import LocalSearchTool, ToolResult
+from local_search_agent.workspace.auth_db import AuthDB
 from local_search_agent.workspace.metadata_db import MetadataDB
 from local_search_agent.workspace.workspace_manager import WorkspaceManager
 
@@ -53,6 +68,22 @@ __all__ = [
     # Workspace
     "WorkspaceManager",
     "MetadataDB",
+    # Multi-tenant RBAC (Phase 2: identity)
+    "AuthDB",
+    "Identity",
+    "IdentityProvider",
+    "APIKeyIdentityProvider",
+    # Multi-tenant RBAC (Phase 3: authorization)
+    "AuthorizationMiddleware",
+    "AuthError",
+    "IdentityResolutionError",
+    "WorkspaceNotFoundError",
+    "InsufficientRoleError",
+    "ProviderUnavailableError",
+    "build_auth_router",
+    "build_whoami_router",
+    "build_grants_router",
+    "build_admin_keys_router",
     # Semantic (Phase 5)
     "ConceptCompiler",
     "ConceptMetadata",

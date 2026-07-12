@@ -61,6 +61,9 @@ Everything runs locally. Meilisearch downloads automatically on first use, no ma
 
 ## Video Demos
 
+- **0.3.0 Release** — Watch the [Role-based Access Control](https://youtu.be/Wjx1Bc0D9uM)
+- **0.2.1 Release** — Watch the [Zooming + Exporting conversation](https://youtu.be/TpYN-ytgmXk)
+- **0.2.0 Release** — Watch the [Reranker + Watch mode](https://youtu.be/6zqhHxmEkBY)
 - **Native UI** — Watch the [UI design and configuration video demo](https://youtu.be/J-POiSDbArs)
 - **CLI AGENT** — Watch the [Terminal document querying video demo](https://youtu.be/ZIiN4NG5g3U)
 - **Python API** — Watch the [Local Search Agent API Integration video demo](https://youtu.be/JfoLKScLi1Y)
@@ -158,7 +161,7 @@ config = SearchAgentConfig(
     document_dirs=["C:/skills"],
     workspace_name="skills",
     provider="google",
-    model_name="gemini-2.0-flash-lite",  # cheap model for retrieval
+    model_name="gemini-3.1-flash-lite",  # cheap model for retrieval
 )
 
 # Index once
@@ -185,6 +188,46 @@ skill_tool = LocalSearchTool(config, return_raw=True)
 ```
 
 See the [Python API Reference](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/api-reference.md#localsearchtool) for the full `LocalSearchTool` documentation.
+
+---
+
+## Multi-Tenant RBAC (Self-Hosting)
+
+Running this for more than just yourself? Turn one shared deployment into
+a proper multi-user server with role-based access control — three roles
+(`superadmin` / `admin` / `member`), `admin`/`member` granted per subject
+per workspace, `superadmin` unconditional across the whole deployment,
+enforced on every protected route. Also includes optional per-role
+model/provider cost controls and concurrency/rate-limit management for
+cloud LLM accounts or shared Ollama hardware.
+
+Three pluggable identity providers cover the common setups out of the
+box: a **header provider** for when you already have an authenticating
+reverse proxy in front, an **API-key provider** (with browser sessions)
+for when you don't have existing auth infrastructure, and a **JWT
+provider** that validates against your company's own IdP (Auth0, Okta,
+Azure AD, Google Workspace) when employees already sign in via SSO.
+
+```bash
+# Bootstrap: create a workspace, a superadmin key, an admin's key, and grant admin access
+local-search workspace create finance "/srv/docs/finance"
+local-search auth create-key --subject root@acme.com --display-name "IT/Ops" --superadmin
+local-search auth create-key --subject alice@acme.com --display-name "Alice" --created-by root@acme.com
+local-search grant-access --subject alice@acme.com --workspace finance --role admin
+
+# Run the dashboard with RBAC turned on
+local-search ui --multi-tenant --db /var/lib/local-search-agent/prod.db
+```
+
+This is entirely opt-in — set `identity_provider` on `SearchAgentConfig`
+(or pass `--multi-tenant` to `local-search ui`) to turn it on; every
+existing single-user workflow above works exactly as written if you never
+do. See [Role-Based Access Control](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/role_based_access_control.md)
+for the full guide, and [Production Deployment](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/production-deployment.md)
+for running this as a shared server (Docker, systemd, reverse proxy) —
+note that Dockerfile/systemd/Caddy files live at the repo root, not in
+the PyPI package itself, so self-hosters should either clone this repo or
+copy the file contents straight out of that doc.
 
 ---
 
@@ -240,6 +283,7 @@ After installation, restart the application — Tesseract is detected automatica
 - **Multi-provider LLM** — Google, Ollama (local), OpenAI, Anthropic
 - **Multi-workspace** — isolate document collections by department, project, channel, or topic. Each workspace is its own search index
 - **Incremental sync** — background scheduler re-indexes only changed files. A 10,000-document corpus with 50 changes re-indexes only the 50
+- **Multi-tenant RBAC** — opt-in three-role access control (`superadmin`/`admin`/`member`) per workspace, with pluggable identity (header, API key, or JWT/SSO), plus optional per-role model/provider cost controls and concurrency/rate-limit management, for running one shared deployment across a team
 - **Full CLI parity** — everything you can do in the UI you can do from the terminal
 - **Python API** — embed the framework directly in your own application
 - **Cross-platform** — Windows, macOS, Linux
@@ -258,6 +302,8 @@ After installation, restart the application — Tesseract is detected automatica
 | [Configuration](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/configuration.md) | All config options and patterns |
 | [Ingestion](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/ingestion.md) | How ingestion works, supported formats, chunking, scheduler |
 | [Multi-Workspace](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/multi-workspace.md) | Managing multiple document collections |
+| [Role-Based Access Control](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/role_based_access_control.md) | Multi-tenant RBAC: identity providers, roles, CLI walkthrough |
+| [Production Deployment](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/production-deployment.md) | Self-hosting as a shared server: Docker, systemd, reverse proxy |
 | [Semantic Search](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/semantic-search.md) | Experimental: concept extraction, query expansion |
 | [Troubleshooting](https://github.com/wiss84/local-search-agent/blob/main/local_search_agent/docs/troubleshooting.md) | Common issues and fixes |
 

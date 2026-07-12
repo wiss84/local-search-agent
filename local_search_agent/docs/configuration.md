@@ -110,6 +110,12 @@ The semantic provider is configured separately via `local-search config set-sema
 | `enable_access_control` | `False` | Enforce Windows/LDAP access control on file server endpoints. |
 | `ldap_server` | `None` | LDAP server URL, e.g. `ldap://company.local`. Required if `enable_access_control=True`. |
 
+### Multi-Tenant RBAC
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `identity_provider` | `None` | An `IdentityProvider` instance (`HeaderIdentityProvider`, `APIKeyIdentityProvider`, `JWTIdentityProvider`, or your own). `None` (the default) is today's single-user mode, completely unchanged — `AuthorizationMiddleware` is never added to the app. Setting this to any `IdentityProvider` opts into three-tier (`superadmin`/`admin`/`member`) enforcement on every protected route — `admin`/`member` are per-workspace grants, `superadmin` is unconditional. See [Role-Based Access Control](role_based_access_control.md) for the full guide, including which provider fits which deployment and a CLI walkthrough for bootstrapping keys and grants. This field is deliberately excluded from `config.to_dict()` (it may hold non-serializable state, e.g. a live `AuthDB` connection) — reconstruct it explicitly if you round-trip a config through `to_dict()`/`from_dict()`. |
+
 ### Watch Mode
 
 | Parameter | Default | Description |

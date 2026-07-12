@@ -1,5 +1,5 @@
 """
-Unit tests for the Phase 3 agent layer.
+Unit tests for agent layer.
 
 Tests cover:
 - Tool output formatting (search_tool, fetch_tool)

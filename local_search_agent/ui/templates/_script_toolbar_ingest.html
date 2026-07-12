@@ -178,6 +178,33 @@ async function _saveViaPywebview(endpoint, filename, extraBody) {
   return true;
 }
 
+/**
+ * Ask the backend to build a file and hand the bytes back directly (no
+ * `folder` in the body -- see api_routes.py's export_chat() docstring for
+ * why this is chosen per-request rather than by any server-side setting),
+ * then trigger the browser's own download mechanism. Used for the
+ * non-pywebview fallback on Word/Excel export, where the file has to be
+ * built server-side (python-docx / openpyxl) unlike Markdown, which the
+ * frontend can just assemble itself (see exportChatMarkdown() below).
+ */
+async function _downloadFileFromBackend(endpoint, filename, body) {
+  const res = await fetch(API + endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || res.statusText);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
 async function exportChatMarkdown() {
   const data = await api(`/sessions/${state.sessionId}/messages`);
   const lines = (data.messages || []).map(m =>
@@ -203,7 +230,12 @@ async function exportChatWord() {
   const filename = `${_exportFilenameBase()}.docx`;
 
   const handled = await _saveViaPywebview('/export-chat-docx', filename, { messages });
-  if (!handled) alert('Word export requires the desktop app (pywebview).');
+  if (handled) return;
+
+  // No pywebview bridge -- plain browser tab (RDP session on the server or
+  // a genuinely separate machine, indistinguishable from here). Ask the
+  // backend for the bytes and let the browser's own download deliver them.
+  await _downloadFileFromBackend('/export-chat-docx', filename, { filename, messages });
 }
 
 $('export-menu').addEventListener('click', async (e) => {

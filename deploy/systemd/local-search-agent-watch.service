@@ -1,0 +1,40 @@
+# Local Search Agent -- watch mode unit (companion to
+# local-search-agent.service in this same directory).
+#
+# `watch start` is Watch Mode's filesystem-event-driven incremental sync
+# (see docs/ingestion.md) -- an independent, separate long-running
+# process from `serve`, NOT a flag on it. The old `serve --scheduler`
+# polling flag is deprecated; this replaces it.
+#
+# Ordered After= the file server unit purely so systemd brings the API up
+# first on a cold boot -- Watch Mode itself doesn't actually depend on the
+# server process at runtime (they only share the same SQLite DB + on-disk
+# Meilisearch data, both of which tolerate either process starting first).
+
+[Unit]
+Description=Local Search Agent — watch mode
+After=local-search-agent.service
+
+[Service]
+Type=simple
+User=search-agent
+Group=search-agent
+EnvironmentFile=/etc/local-search-agent/env
+WorkingDirectory=/var/lib/local-search-agent
+
+# Match --workspace to the same workspace(s) local-search-agent.service is
+# serving. Omit --dirs here the same way as the serve unit, once the
+# workspace is registered — see that unit file's comment.
+ExecStart=/usr/local/bin/local-search watch start --workspace finance
+
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/local-search-agent
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -75,18 +75,22 @@ async function exportTableToExcel(table) {
   );
   if (!headers.length) { alert('Could not read this table.'); return; }
 
-  if (!(window.pywebview && window.pywebview.api)) {
-    alert('Excel export requires the desktop app (pywebview).');
+  const filename = `table-${Date.now()}.xlsx`;
+
+  if (window.pywebview && window.pywebview.api) {
+    const folder = await window.pywebview.api.pick_folder();
+    if (!folder) return; // user cancelled
+    await api('/export-table-xlsx', {
+      method: 'POST',
+      body: JSON.stringify({ folder, filename, headers, rows }),
+    });
     return;
   }
-  const folder = await window.pywebview.api.pick_folder();
-  if (!folder) return; // user cancelled
 
-  const filename = `table-${Date.now()}.xlsx`;
-  await api('/export-table-xlsx', {
-    method: 'POST',
-    body: JSON.stringify({ folder, filename, headers, rows }),
-  });
+  // No pywebview bridge -- plain browser tab (RDP session on the server or
+  // a genuinely separate machine, indistinguishable from here). Ask the
+  // backend for the bytes and let the browser's own download deliver them.
+  await _downloadFileFromBackend('/export-table-xlsx', filename, { filename, headers, rows });
 }
 
 /* =============================================================

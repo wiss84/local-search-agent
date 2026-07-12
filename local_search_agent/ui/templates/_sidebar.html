@@ -8,11 +8,11 @@
     <div class="lp-label">Workspace</div>
     <div style="display:flex;gap:6px;align-items:center">
       <select id="workspace-select" class="lp-select" style="flex:1;min-width:0"></select>
-      <button id="btn-delete-workspace" class="lp-btn-icon-danger" title="Delete workspace">
+      <button id="btn-delete-workspace" class="lp-btn-icon-danger" title="Delete workspace" data-requires-superadmin="true">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="2,4 14,4"/><path d="M5,4V2h6v2"/><path d="M3,4l1,10h8l1-10"/></svg>
       </button>
     </div>
-    <button id="btn-new-workspace" class="lp-btn-ghost">+ New Workspace</button>
+    <button id="btn-new-workspace" class="lp-btn-ghost" data-requires-superadmin="true">+ New Workspace</button>
   </div>
 
   <div class="lp-divider"></div>
@@ -20,6 +20,17 @@
   <!-- ── Provider & Model ── -->
   <div class="lp-section">
     <div class="lp-label">Provider</div>
+    <!-- Model/Provider Access Control (Option B): this is now a PERSONAL,
+         per-query choice, not admin-only. In multi-tenant mode it's
+         populated from /models/allowed (filtered to the caller's current
+         role) and sent as an explicit provider/model_name override on
+         every query -- it no longer PATCHes the shared /api/ui/config
+         default (see _script_models_boot.html). Any role may use it;
+         the actual model that runs is still re-verified server-side
+         against the same allow-list regardless of what this dropdown
+         shows, so there is no new trust boundary here. Single-user mode
+         (no identity_provider) keeps today's exact behavior: PATCHes the
+         shared config, no allow-list, no role concept at all. -->
     <select id="provider-select" class="lp-select">
       <option value="google">Google</option>
       <option value="openai">OpenAI</option>
@@ -35,15 +46,15 @@
   <!-- ── Ingestion ── -->
   <div class="lp-section">
     <div class="lp-label">Ingestion</div>
-    <button class="lp-btn" id="btn-ingest" title="Re-ingest changed files only">
+    <button class="lp-btn" id="btn-ingest" title="Re-ingest changed files only" data-requires-role="admin">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="1,8 1,14 15,14 15,8"/><polyline points="5,4 8,1 11,4"/><line x1="8" y1="1" x2="8" y2="10"/></svg>
       Ingest
     </button>
-    <button class="lp-btn lp-btn-warning" id="btn-force-ingest" title="Force re-ingest all files (ignores modification time)">
+    <button class="lp-btn lp-btn-warning" id="btn-force-ingest" title="Force re-ingest all files (ignores modification time)" data-requires-superadmin="true">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 2.5a6.5 6.5 0 1 1-9.19.35"/><polyline points="1,1 1,5 5,5"/></svg>
       Force Re-ingest
     </button>
-    <button class="lp-btn lp-btn-danger" id="btn-wipe-ingest" title="Wipe index and re-ingest from scratch">
+    <button class="lp-btn lp-btn-danger" id="btn-wipe-ingest" title="Wipe index and re-ingest from scratch" data-requires-superadmin="true">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="2,4 14,4"/><path d="M5,4V2h6v2"/><path d="M3,4l1,10h8l1-10"/></svg>
       Wipe &amp; Re-ingest
     </button>
@@ -55,7 +66,7 @@
   <div class="lp-section">
     <div class="lp-label">Tools</div>
     <div class="lp-sync-row">
-      <button class="lp-btn" id="btn-scheduler" title="Configure ingestion sync (Watch Mode or Scheduler)" style="flex:1">
+      <button class="lp-btn" id="btn-scheduler" title="Configure ingestion sync (Watch Mode or Scheduler)" style="flex:1" data-requires-role="admin">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><polyline points="8,4 8,8 11,10"/></svg>
         Sync
       </button>

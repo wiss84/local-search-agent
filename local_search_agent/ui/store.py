@@ -110,14 +110,32 @@ class UIStore:
         with self._connect() as conn:
             conn.executescript(_SCHEMA_SQL)
             conn.executescript(_INDEX_SQL)
+            # Backfill: add `created_by` column if upgrading from an older
+            # schema (multi-tenant RBAC — see upcoming_features/04). Nullable
+            # so existing single-user rows are untouched; new sessions from
+            # an AuthorizationMiddleware-fronted deployment populate it from
+            # Identity.subject.
+            try:
+                conn.execute("ALTER TABLE chat_sessions ADD COLUMN created_by TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists (new install or already migrated)
         logger.debug("UIStore DB initialised at %r", self._db_path)
 
     # ------------------------------------------------------------------
     # Sessions
     # ------------------------------------------------------------------
 
-    def create_session(self, workspace: str, title: str = "") -> dict:
-        """Create a new chat session and return it as a dict."""
+    def create_session(
+        self, workspace: str, title: str = "", created_by: Optional[str] = None
+    ) -> dict:
+        """Create a new chat session and return it as a dict.
+
+        created_by : Identity.subject of the caller, or None in single-user
+                     mode / when no identity_provider is configured.
+                     Populated by api_routes.py's create_session route from
+                     request.state.identity when present. Used by
+                     list_sessions()'s ownership filter.
+        """
         now = _now_iso()
         session_id = _new_id()
         # Auto-title: "Chat YYYY-MM-DD HH:MM" if none provided
@@ -125,9 +143,9 @@ class UIStore:
             title = "Chat " + datetime.now().strftime("%Y-%m-%d %H:%M")
         with self._lock, self._connect() as conn:
             conn.execute(
-                "INSERT INTO chat_sessions (session_id, workspace, title, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (session_id, workspace, title, now, now),
+                "INSERT INTO chat_sessions (session_id, workspace, title, created_at, updated_at, created_by)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, workspace, title, now, now, created_by),
             )
         logger.debug("Session created: %r (workspace=%r)", session_id, workspace)
         return {
@@ -136,6 +154,7 @@ class UIStore:
             "title": title,
             "created_at": now,
             "updated_at": now,
+            "created_by": created_by,
         }
 
     def list_sessions(self, workspace: str, limit: int = 50) -> list[dict]:
@@ -153,6 +172,21 @@ class UIStore:
                 "SELECT * FROM chat_sessions WHERE session_id = ?", (session_id,)
             ).fetchone()
         return dict(row) if row else None
+
+    def get_session_workspace(self, session_id: str) -> Optional[str]:
+        """
+        Return just the workspace column for a session_id, or None if the
+        session doesn't exist. Used as AuthorizationMiddleware's
+        session_lookup callback for RoutePolicy entries with
+        workspace_from_session_id=True (e.g. DELETE /api/ui/sessions/{id})
+        -- a narrower, purpose-built read than get_session() so the
+        middleware doesn't need to know the full session row shape.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT workspace FROM chat_sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
+        return row["workspace"] if row else None
 
     def rename_session(self, session_id: str, title: str) -> None:
         with self._lock, self._connect() as conn:

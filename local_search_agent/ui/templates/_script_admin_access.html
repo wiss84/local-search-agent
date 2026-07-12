@@ -1,0 +1,290 @@
+/* =============================================================
+   ACCESS TAB (multi-tenant RBAC — admin-only panel)
+   ============================================================= */
+// Thin UI over /api/admin/grants and /api/admin/keys — both already
+// enforced server-side by AuthorizationMiddleware's global_admin scope
+// (see auth/route_policy.py). This panel has zero authority of its own;
+// it's the same trust boundary as the CLI's `grant-access`/`auth
+// create-key` commands, just with a form instead of a terminal.
+// Only rendered/populated when state.multiTenant is true — see
+// updateIdentityBar() in _script_role_gating.html for the tab's
+// show/hide toggle.
+
+function setAccessStatus(id, msg, type = '') {
+  const el = $(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'key-status' + (type ? ' ' + type : '');
+}
+
+// Access Denied dialog -- shown for 403s from grant/revoke/key actions
+// instead of a bare alert() or silent no-op, per logs.md's "UI just
+// flashes without anything" report. Not a new trust boundary of its own:
+// every one of these 403s was already being correctly enforced
+// server-side (see grants_routes.py / admin_keys_routes.py); this only
+// makes the existing denial visible and explains *why*, rather than
+// leaving the admin to guess.
+async function showAccessDenied(detailMessage) {
+  $('access-denied-message').textContent = detailMessage || 'This action requires a higher role than you currently hold.';
+  let contact = 'Contact a superadmin to have this action performed, or to be granted superadmin access yourself.';
+  try {
+    const data = await fetch('/api/admin/keys').then(r => (r.ok ? r.json() : { keys: [] }));
+    const superadmins = (data.keys || [])
+      .filter(k => k.is_superadmin && !k.revoked_at)
+      .map(k => k.subject);
+    if (superadmins.length) {
+      contact = `Contact a superadmin: ${superadmins.join(', ')}`;
+    }
+  } catch (e) {
+    // Fall back to the generic contact line above -- this is a UX nicety,
+    // never worth failing the whole dialog over.
+  }
+  $('access-denied-contact').textContent = contact;
+  $('modal-access-denied').classList.remove('hidden');
+}
+
+$('btn-access-denied-close').addEventListener('click', () => {
+  $('modal-access-denied').classList.add('hidden');
+});
+
+// Simple client-side filter -- both tables are already loaded in full
+// (no server-side pagination), so filtering the already-rendered rows by
+// subject substring is enough; no new endpoint needed. See logs.md's
+// "100+ rows" scaling concern.
+function wireAccessSearch(inputId, tbodyId) {
+  const input = $(inputId);
+  if (!input) return;
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    const tbody = $(tbodyId);
+    Array.from(tbody.rows).forEach(row => {
+      // Subject is always the 2nd column in the grants table, 1st in the
+      // keys table -- rather than hardcode a column index per table,
+      // just match against the row's full text content, which is cheap
+      // at this scale and immune to column-order changes.
+      const matches = !q || row.textContent.toLowerCase().includes(q);
+      row.style.display = matches ? '' : 'none';
+    });
+  });
+}
+wireAccessSearch('access-grants-search', 'access-grants-tbody');
+wireAccessSearch('access-keys-search', 'access-keys-tbody');
+
+async function loadAccessTab() {
+  // Workspace dropdown for the grant form
+  const wsSelect = $('access-grant-workspace');
+  wsSelect.innerHTML = '';
+  (state.workspaces || []).forEach(ws => {
+    const opt = document.createElement('option');
+    opt.value = ws.name || ws;
+    opt.textContent = ws.name || ws;
+    wsSelect.appendChild(opt);
+  });
+
+  // Granting the admin role itself is superadmin-only (see
+  // grants_routes.py's POST /grants) -- hide the option entirely for a
+  // plain admin rather than let them pick it and get a 403, so the UI
+  // doesn't imply an ability that isn't actually there.
+  const roleSelect = $('access-grant-role');
+  const adminOption = roleSelect.querySelector('option[value="admin"]');
+  if (adminOption) adminOption.disabled = !state.isSuperadmin;
+
+  await Promise.all([renderGrantsTable(), renderKeysTable()]);
+}
+
+async function renderGrantsTable() {
+  const tbody = $('access-grants-tbody');
+  tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted)">Loading…</td></tr>';
+  try {
+    const data = await fetch('/api/admin/grants').then(r => {
+      if (!r.ok) throw new Error('Failed to load grants');
+      return r.json();
+    });
+    const grants = data.grants || [];
+    if (!grants.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted)">No grants yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = '';
+    grants.forEach(g => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${escHtml(g.workspace)}</td>
+        <td>${escHtml(g.subject)}</td>
+        <td>${escHtml(g.role)}</td>
+        <td>${escHtml(g.granted_by)}</td>
+        <td class="access-revoke-cell"><button class="access-revoke-btn">Revoke</button></td>
+      `;
+      tr.querySelector('.access-revoke-btn').addEventListener('click', async () => {
+        if (!confirm(`Revoke ${g.subject}'s access to ${g.workspace}?`)) return;
+        try {
+          const res = await fetch('/api/admin/grants', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subject: g.subject, workspaces: [g.workspace] }),
+          });
+          if (res.status === 403) {
+            const body = await res.json().catch(() => ({}));
+            await showAccessDenied(body.detail);
+            return;
+          }
+          if (!res.ok) throw new Error('Failed to revoke access.');
+          await renderGrantsTable();
+        } catch (e) {
+          alert('Failed to revoke: ' + (e.message || e));
+        }
+      });
+      tbody.appendChild(tr);
+    });
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--red)">Failed to load grants.</td></tr>';
+  }
+}
+
+async function renderKeysTable() {
+  const tbody = $('access-keys-tbody');
+  tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted)">Loading…</td></tr>';
+  try {
+    const data = await fetch('/api/admin/keys').then(r => {
+      if (!r.ok) throw new Error('Failed to load keys');
+      return r.json();
+    });
+    const keys = data.keys || [];
+    if (!keys.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted)">No keys yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = '';
+    keys.forEach(k => {
+      const status = k.revoked_at ? 'revoked' : 'active';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${escHtml(k.subject)}</td>
+        <td>${escHtml(k.display_name || '')}</td>
+        <td>${status}</td>
+        <td>${escHtml((k.created_at || '').slice(0, 10))}</td>
+        <td class="access-revoke-cell">${status === 'active' ? '<button class="access-revoke-btn">Revoke</button>' : ''}</td>
+      `;
+      const btn = tr.querySelector('.access-revoke-btn');
+      if (btn) {
+        btn.addEventListener('click', async () => {
+          if (!confirm(`Revoke the API key for ${k.subject}?`)) return;
+          try {
+            const res = await fetch('/api/admin/keys', {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ key_id: k.key_id }),
+            });
+            if (res.status === 403) {
+              const body = await res.json().catch(() => ({}));
+              await showAccessDenied(body.detail);
+              return;
+            }
+            if (!res.ok) throw new Error('Failed to revoke key.');
+            await renderKeysTable();
+          } catch (e) {
+            alert('Failed to revoke: ' + (e.message || e));
+          }
+        });
+      }
+      tbody.appendChild(tr);
+    });
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--red)">Failed to load keys.</td></tr>';
+  }
+}
+
+$('btn-access-grant').addEventListener('click', async () => {
+  const subject = $('access-grant-subject').value.trim();
+  const workspace = $('access-grant-workspace').value;
+  const role = $('access-grant-role').value;
+  if (!subject || !workspace) {
+    setAccessStatus('access-grant-status', 'Subject and workspace are required.', 'err');
+    return;
+  }
+  const btn = $('btn-access-grant');
+  btn.disabled = true; btn.textContent = 'Granting…';
+  try {
+    const res = await fetch('/api/admin/grants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject, workspaces: [workspace], role }),
+    });
+    if (res.status === 403) {
+      const body = await res.json().catch(() => ({}));
+      setAccessStatus('access-grant-status', '', '');
+      await showAccessDenied(body.detail);
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || 'Failed to grant access.');
+    }
+    $('access-grant-subject').value = '';
+    setAccessStatus('access-grant-status', '✓ Granted', 'ok');
+    await renderGrantsTable();
+  } catch (e) {
+    setAccessStatus('access-grant-status', '✗ ' + (e.message || 'Failed'), 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Grant';
+  }
+});
+
+$('btn-access-create-key').addEventListener('click', async () => {
+  const subject = $('access-key-subject').value.trim();
+  const displayName = $('access-key-display-name').value.trim();
+  if (!subject) {
+    setAccessStatus('access-key-status', 'Subject is required.', 'err');
+    return;
+  }
+  const btn = $('btn-access-create-key');
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try {
+    const res = await fetch('/api/admin/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject, display_name: displayName }),
+    });
+    if (res.status === 403) {
+      const body = await res.json().catch(() => ({}));
+      setAccessStatus('access-key-status', '', '');
+      await showAccessDenied(body.detail);
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || 'Failed to create key.');
+    }
+    const data = await res.json();
+    $('access-key-subject').value = '';
+    $('access-key-display-name').value = '';
+    setAccessStatus('access-key-status', '✓ Key created', 'ok');
+    $('access-new-key-value').textContent = data.raw_key;
+    $('access-new-key-reveal').classList.remove('hidden');
+    await renderKeysTable();
+  } catch (e) {
+    setAccessStatus('access-key-status', '✗ ' + (e.message || 'Failed'), 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Create key';
+  }
+});
+
+$('btn-access-copy-key').addEventListener('click', async () => {
+  const val = $('access-new-key-value').textContent;
+  try {
+    await navigator.clipboard.writeText(val);
+    const btn = $('btn-access-copy-key');
+    const original = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  } catch (e) {
+    // Clipboard API unavailable (non-HTTPS context etc.) — text is still
+    // visible and selectable, just not auto-copied.
+  }
+});
+
+// Clear the one-time key reveal whenever the settings modal is closed —
+// it should not linger visible on next open.
+$('btn-settings-close').addEventListener('click', () => {
+  $('access-new-key-reveal').classList.add('hidden');
+});

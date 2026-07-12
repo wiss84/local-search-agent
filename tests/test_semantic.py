@@ -1,5 +1,5 @@
 """
-Unit tests for Phase 5: semantic layer, access control.
+Unit tests Semantic layer, access control.
 
 All LLM calls are mocked. No live services needed.
 

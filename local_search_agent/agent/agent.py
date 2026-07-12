@@ -24,7 +24,10 @@ from langgraph.graph.message import add_messages
 
 from local_search_agent.agent.prompts import MAX_ITERATIONS_NOTICE, build_system_prompt
 from local_search_agent.agent.provider_factory import build_llm
-from local_search_agent.agent.rate_limit_handler import RateLimitHandler
+from local_search_agent.agent.rate_limit_handler import (
+    get_queued_callback,
+    get_shared_rate_limit_handler,
+)
 from local_search_agent.agent.tools.fetch_tool import build_fetch_tool
 from local_search_agent.agent.tools.search_tool import build_search_tool
 from local_search_agent.core.config import SearchAgentConfig
@@ -88,9 +91,10 @@ class LocalSearchAgent:
         llm_with_tools = llm.bind_tools(tools)
         config = self._config
 
-        rate_limiter = RateLimitHandler(
+        rate_limiter = get_shared_rate_limit_handler(
             provider=config.provider,
             model_name=config.model_name,
+            multi_tenant=config.identity_provider is not None,
             max_retries=config.max_retries,
         )
 
@@ -101,6 +105,13 @@ class LocalSearchAgent:
             response = rate_limiter.call_with_retry(
                 llm_with_tools.invoke,
                 state["messages"],
+                # Reads whatever ui/api_routes.py's _agent_thread set for
+                # THIS thread before starting -- see
+                # rate_limit_handler.py's own docstring on why this is a
+                # thread-local rather than a parameter threaded all the
+                # way through the LangGraph node signature (LangGraph
+                # nodes only receive state, not arbitrary extra kwargs).
+                on_queued=get_queued_callback(),
             )
             return {"messages": [response]}
 

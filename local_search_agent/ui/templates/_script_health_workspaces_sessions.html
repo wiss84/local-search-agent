@@ -56,6 +56,8 @@ dom.workspaceSelect.addEventListener('change', async () => {
   await loadSessions();
   clearDrawer();
   dom.messages.innerHTML = '';
+  await refreshRoleGating();  // role is workspace-scoped — recheck on switch
+  await loadAllowedModels();  // model allow-list is role-scoped too (Option B)
 });
 
 /* =============================================================
@@ -85,11 +87,25 @@ function renderSessionList() {
     el.innerHTML = `
       <div class="session-item-row">
         <div class="session-item-title">${escHtml(s.title)}</div>
+        <button class="btn-rename-session" title="Rename session">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 2l3 3-8 8-3.5 1 1-3.5 8-8z"/></svg>
+        </button>
         <button class="btn-delete-session" title="Delete session">✕</button>
       </div>
       <div class="session-item-meta">${fmtDate(s.updated_at)}</div>
     `;
     el.querySelector('.session-item-title').addEventListener('click', () => loadSession(s.session_id));
+    el.querySelector('.btn-rename-session').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const newTitle = prompt('Rename session:', s.title);
+      if (newTitle === null) return;              // cancelled
+      const trimmed = newTitle.trim();
+      if (!trimmed || trimmed === s.title) return; // empty or unchanged
+      try {
+        await api(`/sessions/${s.session_id}`, { method: 'PATCH', body: JSON.stringify({ title: trimmed }) });
+        await loadSessions();
+      } catch (e) { alert('Rename failed: ' + e.message); }
+    });
     el.querySelector('.btn-delete-session').addEventListener('click', async (e) => {
       e.stopPropagation();
       if (!confirm(`Delete session "${s.title}"?`)) return;
@@ -105,13 +121,14 @@ function renderSessionList() {
         await loadSessions();
       } catch (e) { alert('Delete failed: ' + e.message); }
     });
-    // Parent click only fires when NOT clicking the title or delete button
+    // Parent click only fires when NOT clicking the title, rename, or delete button
     el.addEventListener('click', (e) => {
-      if (e.target.closest('.btn-delete-session') || e.target.closest('.session-item-title')) return;
+      if (e.target.closest('.btn-delete-session') || e.target.closest('.btn-rename-session') || e.target.closest('.session-item-title')) return;
       loadSession(s.session_id);
     });
     dom.sessionList.appendChild(el);
   });
+  applyRoleGating();  // freshly rendered delete buttons need re-gating too
 }
 
 async function loadSession(sessionId) {

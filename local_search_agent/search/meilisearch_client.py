@@ -388,3 +388,38 @@ class MeilisearchClient:
             }
         except Exception as e:
             return {"error": str(e)}
+
+    # ------------------------------------------------------------------
+    # Key management (scoped per-workspace keys. Requires
+    # this client to have been constructed with the Meilisearch *master*
+    # key -- only the master key can create/delete keys.
+    # ------------------------------------------------------------------
+
+    def create_scoped_key(
+        self, actions: list[str], indexes: list[str], description: str = ""
+    ) -> tuple[str, str]:
+        """
+        Create a new Meilisearch API key scoped to specific actions/indexes,
+        with no expiry (admin-revocable via delete_scoped_key, same
+        long-lived-until-revoked model as APIKeyIdentityProvider's app-level
+        keys). Returns (key_uid, raw_key) -- the raw key is not retrievable
+        from Meilisearch again after this call, so callers must persist it
+        immediately (encrypted -- see auth/meili_key_crypto.py).
+        """
+        client = self._get_client()
+        key = client.create_key(
+            actions=actions,
+            indexes=indexes,
+            expires_at=None,
+            description=description,
+        )
+        return key.uid, key.key
+
+    def delete_scoped_key(self, key_uid: str) -> None:
+        """Revoke a previously created scoped key by its uid. Best-effort -- logs and swallows errors rather than blocking whatever cleanup triggered it (e.g. workspace deletion)."""
+        try:
+            client = self._get_client()
+            client.delete_key(key_uid)
+            logger.info("Meilisearch scoped key deleted: uid=%r", key_uid)
+        except Exception as e:
+            logger.warning("Could not delete Meilisearch scoped key uid=%r: %s", key_uid, e)

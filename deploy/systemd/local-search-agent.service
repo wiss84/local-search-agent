@@ -1,0 +1,62 @@
+# Local Search Agent -- file server unit.
+#
+# "Option A: bare metal
+# / VM" section. This is one of TWO separate unit files (the other is
+# local-search-agent-watch.service in this same directory) -- `serve` and
+# `watch start` are two independent long-running processes, not one
+# process with a flag, so they get their own units and their own
+# restart/lifecycle management.
+#
+# Install:
+#   sudo useradd --system --create-home --home-dir /var/lib/local-search-agent search-agent
+#   sudo mkdir -p /etc/local-search-agent
+#   sudo cp deploy/systemd/local-search-agent.service /etc/systemd/system/
+#   sudo cp deploy/systemd/local-search-agent-watch.service /etc/systemd/system/
+#   # Create /etc/local-search-agent/env (see the EnvironmentFile= line
+#   # below) with at minimum:
+#   #   MEILI_MASTER_KEY=<a real generated secret, not the dev default>
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now local-search-agent.service
+#   sudo systemctl enable --now local-search-agent-watch.service
+#
+# Adjust --workspace / --dirs below (or drive them via `local-search
+# workspace create` once, ahead of time, and drop --dirs entirely here --
+# workspaces registered in the DB don't need to be re-declared on every
+# `serve` invocation).
+
+[Unit]
+Description=Local Search Agent — file server
+After=network.target
+# Meilisearch itself is a subprocess THIS service launches and manages
+# (see core/meilisearch_manager.py) -- there is no separate
+# meilisearch.service to order against. Don't add one.
+
+[Service]
+Type=simple
+User=search-agent
+Group=search-agent
+EnvironmentFile=/etc/local-search-agent/env
+WorkingDirectory=/var/lib/local-search-agent
+
+# --host 127.0.0.1, not 0.0.0.0 -- bind locally and let the reverse proxy
+# (see deploy/Caddyfile in this repo) be the only thing actually facing
+# the network. Adjust --workspace to match your deployment; add
+# --dirs "/srv/docs/finance" only for a brand-new workspace's first boot,
+# or provision it ahead of time with `local-search workspace create` and
+# omit --dirs here entirely.
+ExecStart=/usr/local/bin/local-search serve --workspace finance --host 127.0.0.1 --port 8000
+
+Restart=on-failure
+RestartSec=5
+
+# Basic hardening -- this process only needs its own data directory and
+# the document directories it's configured to read from; it has no
+# business writing anywhere else on the filesystem.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/local-search-agent
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

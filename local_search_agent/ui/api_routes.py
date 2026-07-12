@@ -11,6 +11,12 @@ Each event has a named type and a JSON data payload:
     event: thinking
     data: {"text": "..."}
 
+    event: queued
+    data: {"waiting_ahead": 2}
+    (emitted when an LLM call inside this query has to wait for a free
+    concurrency slot -- see agent/rate_limit_handler.py's ConcurrencyGate.
+    Purely informational; may appear zero or more times per query.)
+
     event: tool_start
     data: {"tool": "search_local_index", "input": {...}, "call_id": "abc"}
 
@@ -43,7 +49,7 @@ from dataclasses import dataclass, field
 from typing import AsyncIterator, Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -134,6 +140,90 @@ def _normalise_dirs(ws: dict) -> list[str]:
     return [d for d in dirs if d]
 
 
+def _filter_workspaces_by_grant(app_state, request: Request):
+    """
+    Resolve which workspace names the caller is allowed to see, for routes
+    that return a summary across *every* registered workspace at once
+    (ingest/status, scheduler/status, watch/status).
+
+    These routes have the same "listing across many workspaces" shape
+    problem noted on GET /api/ui/workspaces's own docstring: RoutePolicy
+    only expresses "does the caller have role X in workspace Y", not
+    "which of these many workspaces does the caller have any role in at
+    all" -- so these routes are deliberately NOT route_policy.py entries,
+    and identity has to be resolved here directly instead of read off
+    request.state (AuthorizationMiddleware never touches them).
+
+    Returns
+    -------
+    None
+        if single-user mode (no identity_provider configured) or the
+        caller is a superadmin -- meaning "don't filter, return everything".
+    set[str]
+        the workspace names the caller actually holds a grant in,
+        otherwise (multi-tenant mode, non-superadmin caller).
+
+    Raises HTTPException(401) if multi-tenant mode is on and no identity
+    resolves for this request -- these routes leak in-progress file paths
+    and directory names across every workspace, so unauthenticated access
+    is denied outright rather than merely unfiltered.
+    """
+    identity_provider = getattr(app_state.config, "identity_provider", None)
+    if identity_provider is None:
+        return None
+    try:
+        identity = identity_provider.resolve(request)
+    except Exception:
+        identity = None
+    if identity is None:
+        raise HTTPException(401, detail="Authentication required.")
+    if identity.is_superadmin:
+        return None
+    return {row["workspace"] for row in app_state.auth_db.list_access(subject=identity.subject)}
+
+
+def _log_activity(
+    app_state,
+    request: Request,
+    action: str,
+    workspace: Optional[str] = None,
+    detail: Optional[str] = None,
+    success: bool = True,
+) -> None:
+    """
+    Write one activity_log row via app_state.auth_db, per
+    upcoming_features/04-multi-tenant-rbac-mode.md's "Activity logging"
+    section (Phase 6).
+
+    No-ops silently (does not raise) when:
+      - request.state.identity isn't set -- either single-user mode (no
+        identity_provider configured) or the route isn't in
+        route_policy.py's ROUTE_POLICIES, so AuthorizationMiddleware never
+        resolved an identity for this request. Multi-tenant activity
+        logging only makes sense once there's a subject to attribute the
+        row to.
+      - the underlying auth_db write itself fails, per the design doc:
+        "losing an audit row is preferable to failing the underlying
+        action" -- logged as a warning, never re-raised into the caller's
+        request path.
+    """
+    identity = getattr(request.state, "identity", None)
+    if identity is None:
+        return
+    ip_address = request.client.host if request.client else None
+    try:
+        app_state.auth_db.log_activity(
+            subject=identity.subject,
+            action=action,
+            workspace=workspace,
+            detail=detail,
+            ip_address=ip_address,
+            success=success,
+        )
+    except Exception:
+        logger.warning("Failed to write activity_log row for action=%r", action, exc_info=True)
+
+
 # ---------------------------------------------------------------------------
 # Pydantic request bodies
 # ---------------------------------------------------------------------------
@@ -143,6 +233,14 @@ class QueryRequest(BaseModel):
     session_id: str
     question: str
     workspace: Optional[str] = None
+    # Model/Provider Access Control (Option B): per-request model
+    # selection. None means "use the shared deployment-wide default"
+    # (app_state.config.provider / model_name), exactly today's behavior.
+    # Whichever provider/model is actually used -- explicit here or the
+    # shared default -- is checked against the caller's current role's
+    # allow-list before the query runs; see the /query handler below.
+    provider: Optional[str] = None
+    model_name: Optional[str] = None
 
 
 class NewSessionRequest(BaseModel):
@@ -183,6 +281,34 @@ class ModelDeleteRequest(BaseModel):
     model_name: str
 
 
+class ModelAccessRequest(BaseModel):
+    role: str
+    provider: str
+    model_name: str
+
+
+class ConcurrencyLimitRequest(BaseModel):
+    provider: str
+    limit: int
+
+
+class ConcurrencyDeleteRequest(BaseModel):
+    provider: str
+
+
+class QuotaOverrideRequest(BaseModel):
+    provider: str
+    model_name: str
+    rpm: Optional[int] = None
+    tpm: Optional[int] = None
+    rpd: Optional[int] = None
+
+
+class QuotaOverrideDeleteRequest(BaseModel):
+    provider: str
+    model_name: str
+
+
 class SemanticSettingsRequest(BaseModel):
     enable_semantic: bool
     enable_query_expansion: bool
@@ -219,13 +345,19 @@ class AdvancedSettingsRequest(BaseModel):
 
 
 class ExportDocxRequest(BaseModel):
-    folder: str
+    # None (the default) means the caller has no folder to write to --
+    # i.e. a plain browser tab with no pywebview bridge to pick one,
+    # whether that browser happens to be running via RDP on this same
+    # machine or on a genuinely separate one (the two are indistinguishable
+    # from here -- see the handler's own docstring). folder is only ever
+    # set by the desktop app's pick_folder() flow.
+    folder: Optional[str] = None
     filename: str = "chat.docx"
     messages: list[dict]
 
 
 class ExportTableXlsxRequest(BaseModel):
-    folder: str
+    folder: Optional[str] = None
     filename: str = "table.xlsx"
     headers: list[str]
     rows: list[list] = []
@@ -248,6 +380,9 @@ def build_ui_router(app_state) -> APIRouter:
         .workspace_manager WorkspaceManager
         .framework         SearchAgentFramework
         .scheduler         IncrementalSyncScheduler (may be None)
+        .auth_db           AuthDB (used by _log_activity, the grant-filtered
+                           listing routes, and Model/Provider Access
+                           Control's model_access_by_role checks)
     """
     router = APIRouter(prefix="/api/ui", tags=["ui"])
 
@@ -256,16 +391,32 @@ def build_ui_router(app_state) -> APIRouter:
     # ----------------------------------------------------------------
 
     @router.post("/sessions")
-    async def create_session(body: NewSessionRequest) -> JSONResponse:
+    async def create_session(body: NewSessionRequest, request: Request) -> JSONResponse:
+        identity = getattr(request.state, "identity", None)
         session = app_state.store.create_session(
             workspace=body.workspace,
             title=body.title or "",
+            created_by=identity.subject if identity else None,
         )
         return JSONResponse(session)
 
     @router.get("/sessions")
-    async def list_sessions(workspace: str, limit: int = 50) -> JSONResponse:
+    async def list_sessions(
+        workspace: str, request: Request, limit: int = 50, all: bool = False
+    ) -> JSONResponse:
         sessions = app_state.store.list_sessions(workspace=workspace, limit=limit)
+        identity = getattr(request.state, "identity", None)
+        role = getattr(request.state, "role", None)
+        # Ownership filter: a member sees only sessions they created (plus
+        # any pre-migration rows with created_by=NULL, since ownership is
+        # simply unknown for those -- fail open on old data rather than
+        # hiding it unexpectedly). Single-user mode (identity is None) is
+        # unaffected -- no filtering at all. An admin can pass ?all=true to
+        # see every session in the workspace, matching the Roles table's
+        # "delete conversations: admin" scope (admins need visibility to
+        # manage other members' sessions, not just their own).
+        if identity is not None and not (all and role == "admin"):
+            sessions = [s for s in sessions if s.get("created_by") in (None, identity.subject)]
         return JSONResponse({"sessions": sessions})
 
     @router.get("/sessions/{session_id}")
@@ -284,7 +435,37 @@ def build_ui_router(app_state) -> APIRouter:
         return JSONResponse({"ok": True})
 
     @router.delete("/sessions/{session_id}")
-    async def delete_session(session_id: str) -> JSONResponse:
+    async def delete_session(session_id: str, request: Request) -> JSONResponse:
+        """
+        Delete a conversation. A member may delete only sessions they
+        created; an admin may delete any session in the workspace (see
+        route_policy.py's own comment on why this ownership check lives
+        here rather than as a RoutePolicy entry -- RoutePolicy only
+        expresses role tiers, not per-row ownership). Single-user mode (no
+        identity_provider, identity is None) is unrestricted, as always.
+        """
+        identity = getattr(request.state, "identity", None)
+        role = getattr(request.state, "role", None)
+        if identity is not None and role != "admin":
+            session = app_state.store.get_session(session_id)
+            # A pre-migration row with created_by=NULL has unknown
+            # ownership -- fail open (same policy GET /sessions already
+            # uses for its own ownership filter) rather than blocking
+            # deletion of old data nobody can prove they own.
+            if session and session.get("created_by") not in (None, identity.subject):
+                raise HTTPException(403, detail="You can only delete conversations you created.")
+        # Logged before the delete runs, per the design doc's audit-logging
+        # principle -- a crash mid-delete should still leave a record of
+        # intent. request.state.workspace was already resolved by
+        # AuthorizationMiddleware's session_lookup for this route (see
+        # RoutePolicy.workspace_from_session_id), so no extra DB lookup here.
+        _log_activity(
+            app_state,
+            request,
+            "delete_conversation",
+            workspace=getattr(request.state, "workspace", None),
+            detail=f"session_id={session_id}",
+        )
         app_state.store.delete_session(session_id)
         return JSONResponse({"ok": True})
 
@@ -319,6 +500,36 @@ def build_ui_router(app_state) -> APIRouter:
 
         workspace = body.workspace or session["workspace"]
 
+        # Model/Provider Access Control (Option B): whichever provider/model
+        # will actually be used for this query -- the request's own
+        # override if given, otherwise the shared deployment-wide default
+        # -- must be on the caller's CURRENT role's allow-list. Superadmin
+        # and single-user mode (no identity_provider at all) both bypass
+        # this entirely, matching every other RBAC check in this codebase.
+        # request.state.role is whichever role AuthorizationMiddleware
+        # already resolved for THIS workspace (this route is
+        # workspace-scoped in route_policy.py), so a subject who's admin
+        # in one workspace and only member in another is checked against
+        # the correct tier for the workspace they're actually querying.
+        effective_provider = body.provider or app_state.config.provider
+        effective_model = body.model_name or app_state.config.model_name
+
+        identity = getattr(request.state, "identity", None)
+        if identity is not None and not identity.is_superadmin:
+            role = getattr(request.state, "role", None)
+            if not app_state.auth_db.is_model_allowed(role, effective_provider, effective_model):
+                raise HTTPException(
+                    403,
+                    detail=(
+                        f"The model {effective_provider}/{effective_model} is not allowed "
+                        f"for your role."
+                    ),
+                )
+
+        _log_activity(app_state, request, "search", workspace=workspace, detail=body.question)
+
+        meili_api_key = getattr(request.state, "meili_key", None)
+
         return StreamingResponse(
             _run_agent_streaming(
                 app_state=app_state,
@@ -326,6 +537,9 @@ def build_ui_router(app_state) -> APIRouter:
                 question=body.question,
                 workspace=workspace,
                 request=request,
+                meili_api_key=meili_api_key,
+                provider=body.provider,
+                model_name=body.model_name,
             ),
             media_type="text/event-stream",
             headers={
@@ -349,10 +563,10 @@ def build_ui_router(app_state) -> APIRouter:
             app_state.config.provider = body.value
             app_state.config.api_key = None
             app_state.config.__post_init__()
-            app_state._agent = None
+            app_state.invalidate_agents()
         elif body.key == "global.model":
             app_state.config.model_name = body.value
-            app_state._agent = None
+            app_state.invalidate_agents()
         return JSONResponse({"ok": True})
 
     # ----------------------------------------------------------------
@@ -376,7 +590,7 @@ def build_ui_router(app_state) -> APIRouter:
             # Hot-reload: if active provider matches, refresh the config's api_key
             if app_state.config.provider == body.provider:
                 app_state.config.api_key = body.key
-                app_state._agent = None
+                app_state.invalidate_agents()
             return JSONResponse({"ok": True})
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -389,7 +603,7 @@ def build_ui_router(app_state) -> APIRouter:
         deleted = delete_key(body.provider)
         if app_state.config.provider == body.provider:
             app_state.config.api_key = None
-            app_state._agent = None
+            app_state.invalidate_agents()
         return JSONResponse({"ok": True, "deleted": deleted})
 
     # ----------------------------------------------------------------
@@ -455,6 +669,184 @@ def build_ui_router(app_state) -> APIRouter:
         return JSONResponse({"ok": True, "deleted": deleted, "models": get_models()})
 
     # ----------------------------------------------------------------
+    # Model / Provider Access Control (Option B: true per-request model
+    # selection -- see the /query handler above for the actual
+    # enforcement point; these two routes are the allow-list read/write
+    # surface the frontend uses to build its model picker and the admin
+    # UI panel that manages the two role-level allow-lists).
+    # ----------------------------------------------------------------
+
+    @router.get("/models/allowed")
+    async def get_allowed_models(request: Request) -> JSONResponse:
+        """
+        Return the provider/model options the caller's CURRENT role (for
+        the workspace given via ?workspace=) may use, intersected with
+        what's actually configured in models.json -- so a stale allow-list
+        row for a since-deleted model never appears as a phantom option.
+        This is a UX filter on top of the real enforcement in POST /query,
+        not a substitute for it (that check re-verifies server-side
+        regardless of what this endpoint returned).
+
+        Single-user mode (no identity_provider) and superadmin callers get
+        every configured provider/model, unfiltered -- this feature is
+        multi-tenant-only, and superadmin always bypasses every grant in
+        this system by design.
+        """
+        from local_search_agent.core.key_manager import get_models
+
+        all_models = get_models()  # {provider: [model_name, ...]}
+
+        identity_provider = getattr(app_state.config, "identity_provider", None)
+        if identity_provider is None:
+            return JSONResponse({"models": all_models})
+
+        identity = getattr(request.state, "identity", None)
+        if identity is None or identity.is_superadmin:
+            return JSONResponse({"models": all_models})
+
+        role = getattr(request.state, "role", "member")
+        allowed = app_state.auth_db.role_allowed_models(role)
+        filtered = {
+            provider: [m for m in models if m in allowed.get(provider, [])]
+            for provider, models in all_models.items()
+        }
+        return JSONResponse({"models": filtered})
+
+    @router.get("/models/access")
+    async def get_model_access() -> JSONResponse:
+        """Return the full model_access_by_role allow-lists, grouped by
+        role, for the admin UI panel that manages them."""
+        return JSONResponse(
+            {
+                "member": app_state.auth_db.role_allowed_models("member"),
+                "admin": app_state.auth_db.role_allowed_models("admin"),
+            }
+        )
+
+    @router.post("/models/access")
+    async def grant_model_access_route(body: ModelAccessRequest, request: Request) -> JSONResponse:
+        """Add one (role, provider, model_name) row to the allow-list."""
+        identity = getattr(request.state, "identity", None)
+        granted_by = identity.subject if identity else "system"
+        try:
+            app_state.auth_db.grant_model_access(
+                body.role, body.provider, body.model_name, granted_by
+            )
+        except ValueError as e:
+            raise HTTPException(400, detail=str(e))
+        return JSONResponse({"ok": True})
+
+    @router.delete("/models/access")
+    async def revoke_model_access_route(body: ModelAccessRequest) -> JSONResponse:
+        """Remove one (role, provider, model_name) row from the allow-list."""
+        revoked = app_state.auth_db.revoke_model_access(body.role, body.provider, body.model_name)
+        return JSONResponse({"ok": True, "revoked": revoked})
+
+    # ----------------------------------------------------------------
+    # Rate limits & concurrency (07-concurrency-and-model-serving) --
+    # fully admin-configurable so a company on paid-tier accounts with
+    # much higher real limits than the free-tier defaults can set their
+    # own numbers, and so Ollama's concurrency can be tuned to whatever
+    # the admin's own hardware actually supports (this framework has no
+    # way to introspect VRAM itself). Every route here is superadmin_only
+    # by design (route_policy.py) -- unlike Model Manager/Model Access,
+    # which ordinary admins can at least see, these numbers are hidden
+    # from ordinary admins entirely, not just uneditable.
+    # ----------------------------------------------------------------
+
+    @router.get("/rate-limits")
+    async def get_rate_limits() -> JSONResponse:
+        """Return the full configured concurrency limits and quota
+        overrides FOR THIS DEPLOYMENT's OWN MODE, for the superadmin-only
+        settings panel. Single-user and multi-tenant settings are
+        independent namespaces (see key_manager.py) -- this always
+        reflects whichever mode this running process is actually in.
+        """
+        from local_search_agent.core.key_manager import (
+            get_concurrency_limits,
+            get_quota_overrides,
+        )
+
+        multi_tenant = app_state.config.identity_provider is not None
+        return JSONResponse(
+            {
+                "concurrency": get_concurrency_limits(multi_tenant),
+                "quota_overrides": get_quota_overrides(multi_tenant),
+            }
+        )
+
+    @router.post("/rate-limits/concurrency")
+    async def set_concurrency(body: ConcurrencyLimitRequest) -> JSONResponse:
+        """Set the max simultaneous in-flight LLM calls for a provider,
+        in THIS deployment's own mode's namespace."""
+        from local_search_agent.agent.rate_limit_handler import (
+            reset_shared_rate_limit_handlers,
+        )
+        from local_search_agent.core.key_manager import set_concurrency_limit
+
+        multi_tenant = app_state.config.identity_provider is not None
+        try:
+            set_concurrency_limit(body.provider, body.limit, multi_tenant)
+        except ValueError as e:
+            raise HTTPException(400, detail=str(e))
+        # Take effect immediately rather than only after a restart -- see
+        # reset_shared_rate_limit_handlers()'s own docstring.
+        reset_shared_rate_limit_handlers()
+        return JSONResponse({"ok": True})
+
+    @router.delete("/rate-limits/concurrency")
+    async def delete_concurrency(body: ConcurrencyDeleteRequest) -> JSONResponse:
+        """Remove a provider's concurrency cap (reverts to unbounded), in
+        THIS deployment's own mode's namespace."""
+        from local_search_agent.agent.rate_limit_handler import (
+            reset_shared_rate_limit_handlers,
+        )
+        from local_search_agent.core.key_manager import delete_concurrency_limit
+
+        multi_tenant = app_state.config.identity_provider is not None
+        deleted = delete_concurrency_limit(body.provider, multi_tenant)
+        reset_shared_rate_limit_handlers()
+        return JSONResponse({"ok": True, "deleted": deleted})
+
+    @router.post("/rate-limits/quota")
+    async def set_quota(body: QuotaOverrideRequest) -> JSONResponse:
+        """Set (or replace) the RPM/TPM/RPD override for one provider+model,
+        in THIS deployment's own mode's namespace."""
+        from local_search_agent.agent.rate_limit_handler import (
+            reset_shared_rate_limit_handlers,
+        )
+        from local_search_agent.core.key_manager import set_quota_override
+
+        multi_tenant = app_state.config.identity_provider is not None
+        try:
+            set_quota_override(
+                body.provider,
+                body.model_name,
+                multi_tenant,
+                rpm=body.rpm,
+                tpm=body.tpm,
+                rpd=body.rpd,
+            )
+        except ValueError as e:
+            raise HTTPException(400, detail=str(e))
+        reset_shared_rate_limit_handlers()
+        return JSONResponse({"ok": True})
+
+    @router.delete("/rate-limits/quota")
+    async def delete_quota(body: QuotaOverrideDeleteRequest) -> JSONResponse:
+        """Remove a provider+model's RPM/TPM/RPD override, in THIS
+        deployment's own mode's namespace."""
+        from local_search_agent.agent.rate_limit_handler import (
+            reset_shared_rate_limit_handlers,
+        )
+        from local_search_agent.core.key_manager import delete_quota_override
+
+        multi_tenant = app_state.config.identity_provider is not None
+        deleted = delete_quota_override(body.provider, body.model_name, multi_tenant)
+        reset_shared_rate_limit_handlers()
+        return JSONResponse({"ok": True, "deleted": deleted})
+
+    # ----------------------------------------------------------------
     # Semantic / agent settings
     # ----------------------------------------------------------------
 
@@ -476,7 +868,7 @@ def build_ui_router(app_state) -> APIRouter:
         app_state.config.enable_semantic = body.enable_semantic
         app_state.config.enable_query_expansion = body.enable_query_expansion
         app_state.config.semantic_model = body.semantic_model or None
-        app_state._agent = None
+        app_state.invalidate_agents()
 
         set_all_semantic_settings(
             enable_semantic=body.enable_semantic,
@@ -515,7 +907,7 @@ def build_ui_router(app_state) -> APIRouter:
 
         app_state.config.enable_reranking = body.enable_reranking
         app_state.config.rerank_candidate_multiplier = body.rerank_candidate_multiplier
-        app_state._agent = None
+        app_state.invalidate_agents()
         set_all_reranking_settings(
             enable_reranking=body.enable_reranking,
             rerank_candidate_multiplier=body.rerank_candidate_multiplier,
@@ -568,7 +960,7 @@ def build_ui_router(app_state) -> APIRouter:
         effective = get_effective_constants()
         app_state.config.top_k = effective["DEFAULT_TOP_K"]
         app_state.config.max_iterations = effective["DEFAULT_MAX_ITERATIONS"]
-        app_state._agent = None
+        app_state.invalidate_agents()
         return JSONResponse({"ok": True, "effective": effective})
 
     @router.delete("/settings/advanced")
@@ -583,7 +975,7 @@ def build_ui_router(app_state) -> APIRouter:
         effective = get_effective_constants()
         app_state.config.top_k = effective["DEFAULT_TOP_K"]
         app_state.config.max_iterations = effective["DEFAULT_MAX_ITERATIONS"]
-        app_state._agent = None
+        app_state.invalidate_agents()
         return JSONResponse({"ok": True, "effective": effective})
 
     # ----------------------------------------------------------------
@@ -591,12 +983,29 @@ def build_ui_router(app_state) -> APIRouter:
     # ----------------------------------------------------------------
 
     @router.post("/ingest")
-    async def trigger_ingest(body: IngestRequest) -> JSONResponse:
+    async def trigger_ingest(body: IngestRequest, request: Request) -> JSONResponse:
         """
         Trigger a manual re-ingest for a workspace.
         Runs in a background thread so the HTTP response returns immediately.
         The frontend polls /api/ui/ingest/status for progress.
+
+        force=True ("Force Re-ingest" in the UI) reprocesses every file
+        regardless of modification time -- a much heavier, slower operation
+        than the default incremental sync. Tightened to superadmin_only:
+        a workspace admin can still trigger the ordinary incremental ingest
+        (force=False) freely, but re-processing an entire workspace from
+        scratch is reserved for whoever runs the deployment, same
+        provisioning-vs-administration line drawn for workspace
+        create/delete in route_policy.py. Single-user mode (no
+        identity_provider) and superadmin both bypass this, matching every
+        other RBAC check in this codebase.
         """
+        identity = getattr(request.state, "identity", None)
+        if body.force and identity is not None and not identity.is_superadmin:
+            raise HTTPException(403, detail="Force re-ingest is restricted to superadmin.")
+        _log_activity(
+            app_state, request, "ingest", workspace=body.workspace, detail=f"force={body.force}"
+        )
         loop = asyncio.get_event_loop()
         loop.run_in_executor(None, _run_ingest, app_state, body.workspace, body.force)
         return JSONResponse(
@@ -607,11 +1016,27 @@ def build_ui_router(app_state) -> APIRouter:
         )
 
     @router.post("/ingest/wipe")
-    async def ingest_wipe(body: IngestRequest) -> JSONResponse:
+    async def ingest_wipe(body: IngestRequest, request: Request) -> JSONResponse:
         """
         Wipe all indexed documents for the workspace (Meilisearch + SQLite),
         then immediately kick off a force re-ingest with live progress tracking.
+
+        Always superadmin_only -- this is the single most destructive
+        action a workspace admin could otherwise trigger (deletes every
+        indexed document before rebuilding), so unlike ordinary ingest
+        there's no non-destructive variant to leave open to workspace
+        admins. Single-user mode (no identity_provider) bypasses this,
+        matching every other RBAC check in this codebase.
         """
+        identity = getattr(request.state, "identity", None)
+        if identity is not None and not identity.is_superadmin:
+            raise HTTPException(403, detail="Wipe & re-ingest is restricted to superadmin.")
+        # Logged before the destructive wipe is scheduled -- per the design
+        # doc's audit-logging principle, a crash mid-wipe should still leave
+        # a record of intent. The actual SQLite/Meilisearch deletion happens
+        # a moment later in _run_ingest's background thread, which has no
+        # request context (and therefore no identity) to log with directly.
+        _log_activity(app_state, request, "workspace_wipe", workspace=body.workspace)
         loop = asyncio.get_event_loop()
         loop.run_in_executor(None, _run_ingest, app_state, body.workspace, True, True)
         return JSONResponse(
@@ -622,9 +1047,12 @@ def build_ui_router(app_state) -> APIRouter:
         )
 
     @router.get("/ingest/status")
-    async def ingest_status() -> JSONResponse:
+    async def ingest_status(request: Request) -> JSONResponse:
         with _ingest_lock:
             workspaces = [p.to_dict() for p in _ingest_registry.values()]
+        granted = _filter_workspaces_by_grant(app_state, request)
+        if granted is not None:
+            workspaces = [w for w in workspaces if w["workspace"] in granted]
         return JSONResponse({"workspaces": workspaces})
 
     # ----------------------------------------------------------------
@@ -705,10 +1133,21 @@ def build_ui_router(app_state) -> APIRouter:
         return JSONResponse({"ok": True, "message": "Scheduler stopped."})
 
     @router.get("/scheduler/status")
-    async def scheduler_status() -> JSONResponse:
+    async def scheduler_status(request: Request) -> JSONResponse:
         if app_state.scheduler is None:
             return JSONResponse({"running": False, "jobs": []})
-        return JSONResponse(app_state.scheduler.get_status())
+        status = app_state.scheduler.get_status()
+        granted = _filter_workspaces_by_grant(app_state, request)
+        if granted is not None:
+            status["registered_workspaces"] = [
+                w for w in status["registered_workspaces"] if w in granted
+            ]
+            status["scheduled_jobs"] = [
+                j
+                for j in status["scheduled_jobs"]
+                if j["job_id"].removeprefix("incremental_sync_") in granted
+            ]
+        return JSONResponse(status)
 
     # ----------------------------------------------------------------
     # Watch mode (filesystem-event-driven, replaces the polling scheduler)
@@ -789,12 +1228,21 @@ def build_ui_router(app_state) -> APIRouter:
         return JSONResponse({"ok": True, "message": "Watch mode stopped."})
 
     @router.get("/watch/status")
-    async def watch_status() -> JSONResponse:
+    async def watch_status(request: Request) -> JSONResponse:
         if app_state.watcher is None:
             return JSONResponse(
                 {"running": False, "registered_workspaces": [], "watched_directories": {}}
             )
-        return JSONResponse(app_state.watcher.get_status())
+        status = app_state.watcher.get_status()
+        granted = _filter_workspaces_by_grant(app_state, request)
+        if granted is not None:
+            status["registered_workspaces"] = [
+                w for w in status["registered_workspaces"] if w in granted
+            ]
+            status["watched_directories"] = {
+                w: c for w, c in status["watched_directories"].items() if w in granted
+            }
+        return JSONResponse(status)
 
     @router.post("/watch/trigger/{workspace_name}")
     async def trigger_watch_sync(workspace_name: str) -> JSONResponse:
@@ -894,16 +1342,47 @@ def build_ui_router(app_state) -> APIRouter:
     # ----------------------------------------------------------------
 
     @router.get("/workspaces")
-    async def list_workspaces() -> JSONResponse:
+    async def list_workspaces(request: Request) -> JSONResponse:
         workspaces = app_state.workspace_manager.list_workspaces()
         # Normalise: DB stores document_dir (singular TEXT column).
         # Add document_dirs list so the frontend always sees the same shape.
         for ws in workspaces:
             ws["document_dirs"] = _normalise_dirs(ws)
+
+        # Multi-tenant mode: only return workspaces the caller actually has
+        # a workspace_members grant in. This route is deliberately NOT a
+        # route_policy.py entry -- RoutePolicy expresses "does this caller
+        # have role X in workspace Y", but a *listing* needs "which of these
+        # many workspaces does the caller have any role in at all", a
+        # different shape of check that doesn't fit the single-workspace
+        # RoutePolicy model. AuthorizationMiddleware therefore never touches
+        # this route at all (see route_policy.py's own docstring on routes
+        # not in its table), so identity has to be resolved here directly
+        # rather than read off request.state -- otherwise every workspace's
+        # existence leaks to literally any caller, authenticated or not,
+        # once multi-tenant mode is on, and the frontend's dropdown shows
+        # workspaces that immediately 403 the moment they're clicked.
+        identity_provider = getattr(app_state.config, "identity_provider", None)
+        if identity_provider is not None:
+            try:
+                identity = identity_provider.resolve(request)
+            except Exception:
+                identity = None
+            if identity is None:
+                raise HTTPException(401, detail="Authentication required.")
+            if not identity.is_superadmin:
+                granted = {
+                    row["workspace"]
+                    for row in app_state.auth_db.list_access(subject=identity.subject)
+                }
+                workspaces = [ws for ws in workspaces if ws["name"] in granted]
+
         return JSONResponse({"workspaces": workspaces})
 
     @router.delete("/workspaces/{workspace_name}")
-    async def delete_workspace(workspace_name: str, wipe: bool = False) -> JSONResponse:
+    async def delete_workspace(
+        workspace_name: str, request: Request, wipe: bool = False
+    ) -> JSONResponse:
         """
         Delete a workspace registration from SQLite.
         Pass ?wipe=true to also delete its Meilisearch index.
@@ -911,6 +1390,20 @@ def build_ui_router(app_state) -> APIRouter:
         ws = app_state.workspace_manager.get_workspace(workspace_name)
         if ws is None:
             raise HTTPException(404, detail=f"Workspace {workspace_name!r} not found.")
+        # Logged before the delete runs, per the design doc's audit-logging
+        # principle -- a crash mid-delete should still leave a record of intent.
+        _log_activity(
+            app_state, request, "workspace_delete", workspace=workspace_name, detail=f"wipe={wipe}"
+        )
+        if app_state.config.identity_provider is not None:
+            from local_search_agent.auth.meili_key_provisioning import deprovision_workspace_keys
+
+            deprovision_workspace_keys(
+                workspace=workspace_name,
+                meilisearch_url=app_state.config.meilisearch_url,
+                meili_master_key=app_state.config.meili_master_key,
+                auth_db=app_state.auth_db,
+            )
         try:
             app_state.framework.delete_workspace(name=workspace_name, wipe_index=wipe)
             return JSONResponse({"ok": True, "workspace": workspace_name, "index_wiped": wipe})
@@ -937,6 +1430,22 @@ def build_ui_router(app_state) -> APIRouter:
             # canonical document_dir (multi-dir support is a future schema change).
             for d in dirs:
                 app_state.workspace_manager.create_workspace(name=name, document_dir=d)
+            _log_activity(app_state, request, "workspace_create", workspace=name)
+            if app_state.config.identity_provider is not None:
+                # Non-fatal by design -- see meili_key_provisioning.py's
+                # module docstring. A workspace is fully usable without a
+                # scoped key; member requests just fall back to the
+                # service-level master key until this is retried.
+                from local_search_agent.auth.meili_key_provisioning import (
+                    provision_workspace_keys,
+                )
+
+                provision_workspace_keys(
+                    workspace=name,
+                    meilisearch_url=app_state.config.meilisearch_url,
+                    meili_master_key=app_state.config.meili_master_key,
+                    auth_db=app_state.auth_db,
+                )
             return JSONResponse({"ok": True, "workspace": name})
         except Exception as e:
             raise HTTPException(500, detail=str(e))
@@ -946,19 +1455,55 @@ def build_ui_router(app_state) -> APIRouter:
     # ----------------------------------------------------------------
 
     @router.post("/export-chat")
-    async def export_chat(request: Request) -> JSONResponse:
-        import os
+    async def export_chat(request: Request) -> Response:
+        """
+        Export the current chat as Markdown.
 
+        Two delivery modes, chosen per-request by whether `folder` is
+        present in the body -- not a server-side setting:
+
+        - `folder` given (desktop app, via pywebview's pick_folder()):
+          write to that path on THIS process's own disk and open it with
+          the OS default app, exactly as before. Correct because the
+          caller in this mode is always the same machine this process
+          runs on.
+        - `folder` absent (any plain browser tab -- no pywebview bridge to
+          pick a folder with, whether that tab happens to be an
+          employee's RDP session on this same server or a genuinely
+          separate machine reached over the network): return the content
+          directly as the HTTP response body with `Content-Disposition:
+          attachment`, and let the BROWSER's own download mechanism
+          deliver it. This is correct in both of those sub-cases, since a
+          browser's download always lands wherever the person actually is
+          sitting -- unlike writing to a path on this process's disk,
+          which is only ever the right place when that disk belongs to
+          the same machine the person is looking at.
+
+        The frontend already does this exact same fallback for Markdown
+        by building the file client-side and never calling this endpoint
+        at all when there's no pywebview bridge (see exportChatMarkdown()
+        in ui/templates/_script_toolbar_ingest.html) -- this branch exists
+        for any other caller of this endpoint (API/CLI use, or future
+        frontend changes) so the same correct behavior isn't tied to one
+        specific frontend code path.
+        """
         body = await request.json()
-        folder = body.get("folder", "").strip()
+        folder = (body.get("folder") or "").strip()
         filename = body.get("filename", "chat.md").strip()
         content = body.get("content", "")
 
-        if not folder or not os.path.isdir(folder):
-            raise HTTPException(400, detail=f"Invalid folder: {folder!r}")
-
         # Sanitise filename — strip any path separators the JS might have snuck in
         filename = os.path.basename(filename) or "chat.md"
+
+        if not folder:
+            return Response(
+                content=content.encode("utf-8"),
+                media_type="text/markdown",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        if not os.path.isdir(folder):
+            raise HTTPException(400, detail=f"Invalid folder: {folder!r}")
         filepath = os.path.join(folder, filename)
 
         with open(filepath, "w", encoding="utf-8") as f:
@@ -985,25 +1530,34 @@ def build_ui_router(app_state) -> APIRouter:
     # ----------------------------------------------------------------
 
     @router.post("/export-chat-docx")
-    async def export_chat_docx(body: ExportDocxRequest) -> JSONResponse:
-        import os
-
+    async def export_chat_docx(body: ExportDocxRequest) -> Response:
+        """Same dual delivery mode as export_chat() above, keyed off
+        whether `folder` is present -- see that handler's docstring."""
         from local_search_agent.ui.export_docx import build_docx
-
-        folder = body.folder.strip()
-        if not folder or not os.path.isdir(folder):
-            raise HTTPException(400, detail=f"Invalid folder: {folder!r}")
 
         filename = os.path.basename(body.filename) or "chat.docx"
         if not filename.lower().endswith(".docx"):
             filename += ".docx"
-        filepath = os.path.join(folder, filename)
 
         try:
             docx_bytes = build_docx(body.messages, app_state.workspace_manager)
         except Exception as e:
             logger.exception("Word export failed: %s", e)
             raise HTTPException(500, detail=f"Word export failed: {e}")
+
+        if not body.folder:
+            return Response(
+                content=docx_bytes,
+                media_type=(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                ),
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        folder = body.folder.strip()
+        if not os.path.isdir(folder):
+            raise HTTPException(400, detail=f"Invalid folder: {folder!r}")
+        filepath = os.path.join(folder, filename)
 
         with open(filepath, "wb") as f:
             f.write(docx_bytes)
@@ -1028,27 +1582,35 @@ def build_ui_router(app_state) -> APIRouter:
     # ----------------------------------------------------------------
 
     @router.post("/export-table-xlsx")
-    async def export_table_xlsx(body: ExportTableXlsxRequest) -> JSONResponse:
-        import os
-
+    async def export_table_xlsx(body: ExportTableXlsxRequest) -> Response:
+        """Same dual delivery mode as export_chat() above, keyed off
+        whether `folder` is present -- see that handler's docstring."""
         from local_search_agent.ui.export_xlsx import build_xlsx
 
-        folder = body.folder.strip()
-        if not folder or not os.path.isdir(folder):
-            raise HTTPException(400, detail=f"Invalid folder: {folder!r}")
         if not body.headers:
             raise HTTPException(400, detail="Table has no headers to export.")
 
         filename = os.path.basename(body.filename) or "table.xlsx"
         if not filename.lower().endswith(".xlsx"):
             filename += ".xlsx"
-        filepath = os.path.join(folder, filename)
 
         try:
             xlsx_bytes = build_xlsx(body.headers, body.rows)
         except Exception as e:
             logger.exception("Excel export failed: %s", e)
             raise HTTPException(500, detail=f"Excel export failed: {e}")
+
+        if not body.folder:
+            return Response(
+                content=xlsx_bytes,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        folder = body.folder.strip()
+        if not os.path.isdir(folder):
+            raise HTTPException(400, detail=f"Invalid folder: {folder!r}")
+        filepath = os.path.join(folder, filename)
 
         with open(filepath, "wb") as f:
             f.write(xlsx_bytes)
@@ -1116,6 +1678,9 @@ async def _run_agent_streaming(
     question: str,
     workspace: str,
     request: Request,
+    meili_api_key: Optional[str] = None,
+    provider: Optional[str] = None,
+    model_name: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """
     Async generator yielding SSE-formatted strings.
@@ -1123,6 +1688,20 @@ async def _run_agent_streaming(
     The synchronous LangGraph agent runs in a daemon thread and pushes
     events onto a thread-safe queue.  This coroutine drains the queue
     into SSE events, checking for client disconnect between each drain.
+
+    meili_api_key : Per-request scoped Meilisearch key from
+                    request.state.meili_key (Phase 7 -- see
+                    AuthorizationMiddleware._resolve_meili_key and
+                    AppState.get_agent). None for single-user mode and
+                    admin-role multi-tenant requests, both of which use
+                    the service-level master key instead.
+    provider, model_name : Optional per-request model override (Model/
+                    Provider Access Control, Option B). Already validated
+                    against the caller's role's allow-list by the /query
+                    handler before this generator is ever constructed --
+                    this function just forwards them to
+                    AppState.get_agent(), it does no enforcement of its
+                    own.
     """
     import queue as _queue
     import threading
@@ -1135,8 +1714,22 @@ async def _run_agent_streaming(
     app_state.store.add_message(session_id=session_id, role="user", content=question)
 
     def _agent_thread():
+        from local_search_agent.agent.rate_limit_handler import set_queued_callback
+
+        # Notifies the SSE loop below when an LLM call has to wait for a
+        # concurrency slot -- see rate_limit_handler.py's ConcurrencyGate
+        # and set_queued_callback()'s own docstrings. Thread-local, set
+        # fresh at the start of every request's own dedicated thread, so
+        # it's correct even though the underlying LocalSearchAgent/
+        # RateLimitHandler instance may be shared across concurrent
+        # requests (that sharing is the whole point of the gate).
+        set_queued_callback(
+            lambda waiting_ahead: q.put(("queued", {"waiting_ahead": waiting_ahead}))
+        )
         try:
-            agent = app_state.get_agent(workspace)
+            agent = app_state.get_agent(
+                workspace, meili_api_key=meili_api_key, provider=provider, model_name=model_name
+            )
             agent._get_tools()  # ensure graph + tools are initialised
 
             for event in agent.stream(question=question, workspace=workspace):
@@ -1200,6 +1793,7 @@ async def _run_agent_streaming(
             logger.exception("Agent thread error: %s", e)
             q.put((ERROR_SENTINEL, str(e)))
         finally:
+            set_queued_callback(None)
             q.put((DONE_SENTINEL, None))
 
     threading.Thread(target=_agent_thread, daemon=True).start()
@@ -1229,6 +1823,14 @@ async def _run_agent_streaming(
         if event_type == "thinking":
             assembled_thinking = data["text"]
             yield _sse_event("thinking", data)
+
+        elif event_type == "queued":
+            # Emitted by ConcurrencyGate.acquire()'s on_wait callback
+            # (see rate_limit_handler.py) -- an LLM call inside this
+            # query is waiting for a free concurrency slot. Purely
+            # informational for the UI ("N requests ahead of you"); no
+            # store write, no assembled state to update.
+            yield _sse_event("queued", data)
 
         elif event_type == "tool_start":
             yield _sse_event("tool_start", data)

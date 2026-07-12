@@ -12,6 +12,7 @@ import uvicorn
 
 from local_search_agent.core.config import SearchAgentConfig
 from local_search_agent.server.fastapi_app import build_app
+from local_search_agent.workspace.auth_db import AuthDB
 from local_search_agent.workspace.metadata_db import MetadataDB
 from local_search_agent.workspace.workspace_manager import WorkspaceManager
 
@@ -49,6 +50,7 @@ class SearchAgentFramework:
         self._server: Optional[uvicorn.Server] = None
         self._workspace_manager = WorkspaceManager(db_path=config.db_path)
         self._metadata_db = MetadataDB(db_path=config.db_path)
+        self._auth_db = AuthDB(db_path=config.db_path)
         self._meili_client = None
         self._scheduler = None
         self._watcher = None
@@ -777,3 +779,235 @@ class SearchAgentFramework:
         effective = get_effective_constants()
         logger.info("Advanced settings updated: %s", overrides)
         return effective
+
+    # ------------------------------------------------------------------
+    # Multi-tenant RBAC: workspace_members grants
+    # (see upcoming_features/04-multi-tenant-rbac-mode.md)
+    # ------------------------------------------------------------------
+
+    def grant_workspace_access(
+        self,
+        workspaces: list[str],
+        subject: str,
+        role: str,
+        granted_by: str,
+    ) -> None:
+        """
+        Grant `subject` a role across one or more workspaces in a single
+        atomic call — either every workspace gets the grant or none do.
+
+        Parameters
+        ----------
+        workspaces : Workspace names to grant access to.
+        subject    : Stable identity (e.g. email) — see Identity.subject.
+        role       : 'member' | 'admin'.
+        granted_by : Identity.subject of whoever is performing the grant
+                    (recorded for audit purposes in workspace_members.granted_by).
+
+        Example
+        -------
+        ```python
+        framework.grant_workspace_access(
+            workspaces=["finance", "marketing"],
+            subject="alice@acme.com",
+            role="member",
+            granted_by="admin@acme.com",
+        )
+        ```
+        """
+        self._auth_db.grant_access_bulk(
+            workspaces=workspaces, subject=subject, role=role, granted_by=granted_by
+        )
+
+    def revoke_workspace_access(self, subject: str, workspaces: Optional[list[str]] = None) -> int:
+        """
+        Revoke `subject`'s access. If `workspaces` is None, revokes every
+        grant for that subject; otherwise revokes only the listed workspaces.
+
+        Returns the number of grants removed.
+        """
+        return self._auth_db.revoke_access(subject=subject, workspaces=workspaces)
+
+    def list_workspace_access(
+        self, subject: Optional[str] = None, workspace: Optional[str] = None
+    ) -> list[dict]:
+        """List grants, optionally filtered by subject and/or workspace."""
+        return self._auth_db.list_access(subject=subject, workspace=workspace)
+
+    def get_workspace_role(self, subject: str, workspace: str) -> Optional[str]:
+        """Return `subject`'s role in `workspace`, or None if they have no grant (fail-closed)."""
+        return self._auth_db.get_role(subject=subject, workspace=workspace)
+
+    # ------------------------------------------------------------------
+    # Multi-tenant RBAC: API key management (APIKeyIdentityProvider)
+    # ------------------------------------------------------------------
+
+    def _get_api_key_provider(self):
+        from local_search_agent.auth.api_key_provider import APIKeyIdentityProvider
+
+        return APIKeyIdentityProvider(self._auth_db)
+
+    def create_api_key(
+        self,
+        subject: str,
+        created_by: str,
+        display_name: str = "",
+        is_superadmin: bool = False,
+    ) -> tuple[str, str]:
+        """
+        Generate a new API key for `subject` (APIKeyIdentityProvider mode).
+
+        Returns (key_id, raw_key). raw_key is shown exactly once here —
+        only its argon2 hash is persisted. The caller (CLI/admin API) is
+        responsible for displaying it to the operator and never logging it.
+        """
+        return self._get_api_key_provider().create_key(
+            subject=subject,
+            created_by=created_by,
+            display_name=display_name,
+            is_superadmin=is_superadmin,
+        )
+
+    def revoke_api_key(self, key_id: str) -> bool:
+        """Revoke an API key by its key_id. Returns True if an active key was found and revoked."""
+        return self._get_api_key_provider().revoke_key(key_id)
+
+    def list_api_keys(self, subject: Optional[str] = None) -> list[dict]:
+        """List API key metadata (never the raw key or its hash), optionally filtered by subject."""
+        return self._get_api_key_provider().list_keys(subject=subject)
+
+    # ------------------------------------------------------------------
+    # Model / Provider Access Control (which provider+model combinations
+    # each role may use for their own queries -- a cost control, not a
+    # workspace permission. See docs/role_based_access_control.md.)
+    # ------------------------------------------------------------------
+
+    def grant_model_access(
+        self, role: str, provider: str, model_name: str, granted_by: str
+    ) -> None:
+        """
+        Grant `role` ('member' or 'admin') permission to use `provider`/
+        `model_name` for their own queries. A role with nothing granted
+        has access to nothing (fail-closed) -- grant at least one model to
+        each role before anyone tries to query. Superadmin always has
+        access to every configured model and is never affected by this.
+
+        Example
+        -------
+        ```python
+        framework.grant_model_access("member", "google", "gemma-4-31b-it", granted_by="admin@acme.com")
+        ```
+        """
+        self._auth_db.grant_model_access(
+            role=role, provider=provider, model_name=model_name, granted_by=granted_by
+        )
+
+    def revoke_model_access(self, role: str, provider: str, model_name: str) -> bool:
+        """Remove a single role/provider/model allow-list entry. Returns True if one existed."""
+        return self._auth_db.revoke_model_access(
+            role=role, provider=provider, model_name=model_name
+        )
+
+    def list_model_access(self, role: Optional[str] = None) -> list[dict]:
+        """List model-access grant rows, optionally filtered by role ('member'/'admin')."""
+        return self._auth_db.list_model_access(role=role)
+
+    # ------------------------------------------------------------------
+    # Rate Limits & Concurrency (deployment-wide LLM call caps and
+    # RPM/TPM/RPD quota tracking. See docs/role_based_access_control.md.)
+    #
+    # multi_tenant : Single-user and multi-tenant settings are stored in
+    # independent namespaces in the same rate_limits.json -- pass
+    # `config.identity_provider is not None` for the natural default that
+    # matches whichever mode this framework instance is actually running
+    # in, or an explicit bool to manage the other namespace deliberately
+    # (e.g. provisioning a multi-tenant deployment's limits from a
+    # single-user-mode script before it's ever run with --multi-tenant).
+    # ------------------------------------------------------------------
+
+    def set_concurrency_limit(self, provider: str, limit: int, multi_tenant: bool) -> None:
+        """
+        Cap the max number of simultaneous in-flight LLM calls for a
+        provider. For Ollama this is the framework-side mirror of
+        Ollama's own OLLAMA_NUM_PARALLEL -- set it based on your actual
+        hardware's real capacity, this framework can't introspect your
+        VRAM itself. Takes effect on the next call for that provider (no
+        restart needed).
+
+        Example
+        -------
+        ```python
+        framework.set_concurrency_limit("ollama", 2, multi_tenant=False)
+        ```
+        """
+        from local_search_agent.agent.rate_limit_handler import reset_shared_rate_limit_handlers
+        from local_search_agent.core.key_manager import set_concurrency_limit as _set
+
+        _set(provider, limit, multi_tenant)
+        reset_shared_rate_limit_handlers()
+
+    def delete_concurrency_limit(self, provider: str, multi_tenant: bool) -> bool:
+        """Remove a provider's concurrency cap (reverts to unbounded). Returns True if one existed."""
+        from local_search_agent.agent.rate_limit_handler import reset_shared_rate_limit_handlers
+        from local_search_agent.core.key_manager import delete_concurrency_limit as _delete
+
+        result = _delete(provider, multi_tenant)
+        reset_shared_rate_limit_handlers()
+        return result
+
+    def get_concurrency_limits(self, multi_tenant: bool) -> dict[str, int]:
+        """Return {provider: max_simultaneous_llm_calls} for the given mode's namespace."""
+        from local_search_agent.core.key_manager import get_concurrency_limits as _get
+
+        return _get(multi_tenant)
+
+    def set_quota_override(
+        self,
+        provider: str,
+        model_name: str,
+        multi_tenant: bool,
+        rpm: Optional[int] = None,
+        tpm: Optional[int] = None,
+        rpd: Optional[int] = None,
+    ) -> None:
+        """
+        Set (or replace) the RPM/TPM/RPD override for one provider+model.
+        Google gets auto-detected free-tier limits by default (overridable
+        here); every other provider tracks nothing at all until an
+        override is set here -- this is the only way OpenAI/Anthropic/
+        Ollama get real sliding-window quota tracking rather than blind
+        retry-on-error. At least one of rpm/tpm/rpd is required; an
+        omitted dimension means "don't track this", not "unlimited".
+
+        Example
+        -------
+        ```python
+        # A paid-tier OpenAI account with real, much-higher limits than the free tier
+        framework.set_quota_override("openai", "gpt-5", multi_tenant=True, rpm=500, tpm=2_000_000)
+        ```
+        """
+        from local_search_agent.agent.rate_limit_handler import reset_shared_rate_limit_handlers
+        from local_search_agent.core.key_manager import set_quota_override as _set
+
+        _set(provider, model_name, multi_tenant, rpm=rpm, tpm=tpm, rpd=rpd)
+        reset_shared_rate_limit_handlers()
+
+    def delete_quota_override(self, provider: str, model_name: str, multi_tenant: bool) -> bool:
+        """Remove a provider+model's RPM/TPM/RPD override. Returns True if one existed."""
+        from local_search_agent.agent.rate_limit_handler import reset_shared_rate_limit_handlers
+        from local_search_agent.core.key_manager import delete_quota_override as _delete
+
+        result = _delete(provider, model_name, multi_tenant)
+        reset_shared_rate_limit_handlers()
+        return result
+
+    def get_quota_overrides(self, multi_tenant: bool, provider: Optional[str] = None) -> dict:
+        """
+        Return configured RPM/TPM/RPD overrides for the given mode's
+        namespace. provider=None returns the full {provider: {model_name:
+        {...}}} dict; a specific provider returns just that provider's
+        {model_name: {...}}.
+        """
+        from local_search_agent.core.key_manager import get_quota_overrides as _get
+
+        return _get(multi_tenant, provider)

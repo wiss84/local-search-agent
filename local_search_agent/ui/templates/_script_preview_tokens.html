@@ -1,7 +1,13 @@
 /* =============================================================
    DOCUMENT PREVIEW PANEL
    ============================================================= */
-const FILE_SERVER = 'http://127.0.0.1:{{ file_server_port }}';
+// Same-host, different-port than the dashboard itself, so window.location
+// .hostname (not .origin, which would keep the dashboard's own port) is
+// combined with the injected file_server_port -- adapts to 127.0.0.1,
+// localhost, or a LAN IP automatically. See _script_core.html's API
+// constant for the identical reasoning; this had the same 127.0.0.1
+// hardcode bug.
+const FILE_SERVER = window.location.protocol + '//' + window.location.hostname + ':{{ file_server_port }}';
 let _previewCurrentDocId = null;
 let _previewCurrentText  = null;
 

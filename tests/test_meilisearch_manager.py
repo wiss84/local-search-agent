@@ -41,10 +41,12 @@ class TestMeilisearchManagerProperties:
         assert manager.binary_path == expected
         mock_binary_path.assert_called_once()
 
+    @patch("local_search_agent.core.meilisearch_manager._logs_dir")
     @patch("local_search_agent.core.meilisearch_manager._cache_dir")
-    def test_cache_dir_returns_user_cache_dir(self, mock_cache_dir):
+    def test_cache_dir_returns_user_cache_dir(self, mock_cache_dir, mock_logs_dir):
         expected = Path("/fake/cache")
         mock_cache_dir.return_value = expected
+        mock_logs_dir.return_value = Path("/fake/cache/logs")
         manager = MeilisearchManager()
         assert manager.cache_dir == expected
         mock_cache_dir.assert_called()
